@@ -16,7 +16,7 @@ Long press B cycles brightness.
 
 ## Screens
 
-1. `PROXMOX`: global status, host count, guest count, aggregate CPU/RAM/storage pressure, focused host, and the top active alert.
+1. `PROXMOX`: global status counts, selected host focus metrics, selected host storage pressure, load, and the top active alert.
 2. `HOSTS`: paged compact host list with CPU/RAM/root storage.
 3. `HOST`: selected host metric detail with CPU, RAM, rootfs, uptime, load, and guest count.
 4. `SYSTEM`: selected host system detail with CPU model, GPU summary when Proxmox exposes it, PVE version, and kernel.
