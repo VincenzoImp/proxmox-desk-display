@@ -66,12 +66,13 @@ struct Host {
   int64_t storageUsed = 0;
   int64_t storageTotal = 0;
   int64_t uptime = 0;
-  String load1;
+  String loadAvg;
   String pveVersion;
   String kernelVersion;
   int running = 0;
   int stopped = 0;
   String health = "unknown";
+  String error;
 };
 
 struct Storage {
@@ -105,6 +106,8 @@ struct Guest {
   int64_t netOut = 0;
   int64_t diskRead = 0;
   int64_t diskWrite = 0;
+  String tags;
+  String expected;
   bool pinned = false;
   String health = "unknown";
 };
@@ -140,6 +143,7 @@ uint8_t screenIndex = 0;
 size_t selectedHost = 0;
 size_t selectedStorage = 0;
 size_t selectedGuest = 0;
+size_t selectedAlert = 0;
 
 struct ButtonState {
   bool previous = false;
@@ -202,8 +206,14 @@ String trimTrailingSlash(String value) {
 
 String formatBytes(int64_t bytes) {
   if (bytes <= 0) return "-";
+  const double tib = 1024.0 * 1024.0 * 1024.0 * 1024.0;
   const double gib = 1024.0 * 1024.0 * 1024.0;
   const double mib = 1024.0 * 1024.0;
+  if (bytes >= static_cast<int64_t>(tib)) {
+    double value = bytes / tib;
+    if (value >= 10.0) return String(static_cast<int>(round(value))) + "T";
+    return String(value, 1) + "T";
+  }
   if (bytes >= static_cast<int64_t>(gib)) {
     double value = bytes / gib;
     if (value >= 10.0) return String(static_cast<int>(round(value))) + "G";
@@ -213,6 +223,11 @@ String formatBytes(int64_t bytes) {
     return String(static_cast<int>(round(bytes / mib))) + "M";
   }
   return String(bytes / 1024) + "K";
+}
+
+int pctOf(int64_t used, int64_t total) {
+  if (used <= 0 || total <= 0) return 0;
+  return constrain(static_cast<int>(round(static_cast<double>(used) / static_cast<double>(total) * 100.0)), 0, 100);
 }
 
 String formatUptime(int64_t seconds) {
@@ -439,12 +454,17 @@ bool parseState(const String &payload) {
     host.storageTotal = h["storage_total_bytes"] | 0;
     host.uptime = h["uptime_sec"] | 0;
     JsonArray load = h["load_avg"].as<JsonArray>();
-    if (!load.isNull() && load.size() > 0) host.load1 = load[0].as<String>();
+    if (!load.isNull() && load.size() > 0) {
+      host.loadAvg = load[0].as<String>();
+      if (load.size() > 1) host.loadAvg += "/" + load[1].as<String>();
+      if (load.size() > 2) host.loadAvg += "/" + load[2].as<String>();
+    }
     host.pveVersion = h["pve_version"] | "";
     host.kernelVersion = h["kernel_version"] | "";
     host.running = h["guests_running"] | 0;
     host.stopped = h["guests_stopped"] | 0;
     host.health = h["health"] | "unknown";
+    host.error = h["error"] | "";
   }
 
   if (state.hostCount == 0) {
@@ -494,7 +514,9 @@ bool parseState(const String &payload) {
     guest.netOut = g["net_out_bytes"] | 0;
     guest.diskRead = g["disk_read_bytes"] | 0;
     guest.diskWrite = g["disk_write_bytes"] | 0;
+    guest.tags = g["tags"] | "";
     guest.pinned = g["pinned"] | false;
+    guest.expected = g["expected"] | "";
     guest.health = g["health"] | "unknown";
   }
 
@@ -510,6 +532,12 @@ bool parseState(const String &payload) {
     alert.severity = a["severity"] | "unknown";
     alert.title = a["title"] | "";
     alert.message = a["message"] | "";
+  }
+
+  if (state.alertCount == 0) {
+    selectedAlert = 0;
+  } else if (selectedAlert >= state.alertCount) {
+    selectedAlert = state.alertCount - 1;
   }
 
   lastError = "";
@@ -604,26 +632,30 @@ void drawOverview() {
   int onlineHosts = 0;
   int cpuSum = 0;
   int cpuMax = 0;
-  int memorySum = 0;
+  int64_t memoryUsed = 0;
+  int64_t memoryTotal = 0;
   int memoryMax = 0;
   for (size_t i = 0; i < state.hostCount; ++i) {
     Host &h = state.hosts[i];
     if (!h.online) continue;
     onlineHosts++;
     cpuSum += h.cpu;
-    memorySum += h.memory;
+    memoryUsed += h.memoryUsed;
+    memoryTotal += h.memoryTotal;
     cpuMax = max(cpuMax, h.cpu);
     memoryMax = max(memoryMax, h.memory);
   }
 
-  int diskSum = 0;
+  int64_t diskUsed = 0;
+  int64_t diskTotal = 0;
   int diskMax = 0;
   int diskCount = 0;
   for (size_t i = 0; i < state.storageCount; ++i) {
     Storage &s = state.storages[i];
     if (s.diskTotal <= 0) continue;
     diskCount++;
-    diskSum += s.disk;
+    diskUsed += s.diskUsed;
+    diskTotal += s.diskTotal;
     diskMax = max(diskMax, s.disk);
   }
   if (diskCount == 0) {
@@ -631,34 +663,48 @@ void drawOverview() {
       Host &h = state.hosts[i];
       if (h.storageTotal <= 0) continue;
       diskCount++;
-      diskSum += h.storage;
+      diskUsed += h.storageUsed;
+      diskTotal += h.storageTotal;
       diskMax = max(diskMax, h.storage);
     }
   }
 
   int cpuAvg = onlineHosts == 0 ? 0 : cpuSum / onlineHosts;
-  int memoryAvg = onlineHosts == 0 ? 0 : memorySum / onlineHosts;
-  int diskAvg = diskCount == 0 ? 0 : diskSum / diskCount;
+  int memoryAvg = pctOf(memoryUsed, memoryTotal);
+  int diskAvg = pctOf(diskUsed, diskTotal);
 
-  int y = 58;
+  int y = 54;
   drawMetricRow("CPU", "avg " + String(cpuAvg) + "%  max " + String(cpuMax) + "%", cpuAvg, TFT_CYAN, y);
-  y += 20;
+  y += 18;
   drawMetricRow("RAM", "avg " + String(memoryAvg) + "%  max " + String(memoryMax) + "%", memoryAvg,
                 memoryMax >= 90 ? TFT_RED : TFT_GREEN, y);
-  y += 20;
+  y += 18;
   drawMetricRow("DSK", "avg " + String(diskAvg) + "%  max " + String(diskMax) + "%", diskAvg,
                 diskMax >= 90 ? TFT_RED : TFT_YELLOW, y);
 
-  y += 28;
+  Host &focus = state.hosts[selectedHost];
+  y += 22;
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("FOCUS " + String(selectedHost + 1) + "/" + String(state.hostCount), 10, y);
+  tft.setTextColor(focus.online ? TFT_WHITE : TFT_RED, TFT_BLACK);
+  tft.drawString(clipText(focus.name, 24), 86, y);
+
+  y += 14;
+  tft.fillRect(11, y + 3, 7, 7, colorForHealth(focus.health));
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("C" + String(focus.cpu), 28, y);
+  tft.drawString("R" + String(focus.memory), 72, y);
+  tft.drawString("D" + String(focus.storage), 116, y);
+  tft.drawString(String(focus.running) + " run", 160, y);
+
+  y += 16;
   tft.setTextColor(state.summary.alerts > 0 ? colorForHealth(state.summary.health) : TFT_GREEN, TFT_BLACK);
-  tft.drawString(state.summary.alerts > 0 ? "TOP ALERT" : "STATUS", 10, y);
+  tft.drawString(state.summary.alerts > 0 ? "!" + String(state.summary.alerts) : "OK", 10, y);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   if (state.summary.alerts > 0 && state.alertCount > 0) {
-    tft.drawString(clipText(state.alerts[0].title, 36), 10, y + 14);
-    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    tft.drawString(String(state.summary.alerts) + " active alerts", 10, y + 28);
+    tft.drawString(clipText(state.alerts[0].title, 40), 42, y);
   } else {
-    tft.drawString("All configured checks are OK", 10, y + 14);
+    tft.drawString("All configured checks are OK", 42, y);
   }
 
   drawFooter();
@@ -731,6 +777,12 @@ void drawHostDetail() {
   tft.drawString(String(selectedHost + 1) + "/" + String(state.hostCount), tft.width() - 8, 38);
   tft.setTextDatum(TL_DATUM);
 
+  if (!h.online && h.error.length() > 0) {
+    drawWrappedField("ERR", h.error, 58, 4);
+    drawFooter();
+    return;
+  }
+
   int y = 58;
   drawMetricRow("CPU", String(h.cpu) + "% / " + String(h.maxCPU) + " cores", h.cpu, TFT_CYAN, y);
 
@@ -745,7 +797,7 @@ void drawHostDetail() {
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.drawString("LOAD", 10, y);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString(h.load1.length() ? h.load1 : "-", 72, y);
+  tft.drawString(h.loadAvg.length() ? h.loadAvg : "-", 72, y);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.drawString("UP", 160, y);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -923,7 +975,10 @@ void drawGuestDetail() {
   tft.setTextDatum(TL_DATUM);
 
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  String where = g.type + "  " + g.hostName;
+  String where = g.type + "  " + g.hostName + "  up " + formatUptime(g.uptime);
+  if (g.tags.length() > 0) {
+    where += "  #" + g.tags.substring(0, g.tags.indexOf(";") >= 0 ? g.tags.indexOf(";") : g.tags.length());
+  }
   if (where.length() > 42) where = where.substring(0, 42);
   tft.drawString(where, 10, 54);
 
@@ -950,15 +1005,15 @@ void drawGuestDetail() {
 
   y += 18;
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.drawString("UP", 10, y);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString(formatUptime(g.uptime), 92, y);
-
-  y += 18;
-  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.drawString("NET", 10, y);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString(formatBytes(g.netIn) + " in  " + formatBytes(g.netOut) + " out", 92, y);
+
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("IO", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(formatBytes(g.diskRead) + " r  " + formatBytes(g.diskWrite) + " w", 92, y);
 
   drawFooter();
 }
@@ -975,16 +1030,34 @@ void drawAlerts() {
     tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
     tft.drawString("All configured checks are OK", 10, y + 28);
   }
-  for (size_t i = 0; i < state.alertCount && y < tft.height() - 26; ++i) {
+
+  const int rowH = 34;
+  size_t visibleRows = static_cast<size_t>((tft.height() - 26 - y) / rowH);
+  if (visibleRows == 0) visibleRows = 1;
+  size_t start = visibleWindowStart(selectedAlert, state.alertCount, visibleRows);
+  size_t end = start + visibleRows;
+  if (end > state.alertCount) end = state.alertCount;
+  if (state.alertCount > 0) {
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.setTextDatum(TR_DATUM);
+    tft.drawString(String(static_cast<int>(start + 1)) + "-" + String(static_cast<int>(end)) + "/" +
+                       String(static_cast<int>(state.alertCount)),
+                   tft.width() - 8, 38);
+    tft.setTextDatum(TL_DATUM);
+  }
+
+  for (size_t i = start; i < end && y < tft.height() - 26; ++i) {
     Alert &a = state.alerts[i];
-    tft.setTextColor(colorForHealth(a.severity), TFT_BLACK);
+    uint16_t rowBg = i == selectedAlert ? TFT_DARKGREY : TFT_BLACK;
+    if (i == selectedAlert) tft.fillRect(6, y - 1, tft.width() - 12, 31, rowBg);
+    tft.setTextColor(colorForHealth(a.severity), rowBg);
     tft.drawString(a.severity.substring(0, 4), 10, y);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextColor(TFT_WHITE, rowBg);
     String title = a.title;
     if (title.length() > 31) title = title.substring(0, 31);
     tft.drawString(title, 54, y);
     y += 16;
-    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.setTextColor(i == selectedAlert ? TFT_LIGHTGREY : TFT_DARKGREY, rowBg);
     String msg = a.message;
     if (msg.length() > 36) msg = msg.substring(0, 36);
     tft.drawString(msg, 54, y);
@@ -1109,13 +1182,19 @@ void nextStorage() {
   render();
 }
 
+void nextAlert() {
+  if (state.alertCount == 0) return;
+  selectedAlert = (selectedAlert + 1) % state.alertCount;
+  render();
+}
+
 void manualRefresh() {
   fetchState();
   render();
 }
 
 void buttonBShort() {
-  if (screenIndex == 1 || screenIndex == 2 || screenIndex == 3) {
+  if (screenIndex == 0 || screenIndex == 1 || screenIndex == 2 || screenIndex == 3) {
     nextHost();
     return;
   }
@@ -1125,6 +1204,10 @@ void buttonBShort() {
   }
   if (screenIndex == 5 || screenIndex == 6) {
     nextGuest();
+    return;
+  }
+  if (screenIndex == 7) {
+    nextAlert();
     return;
   }
   manualRefresh();
