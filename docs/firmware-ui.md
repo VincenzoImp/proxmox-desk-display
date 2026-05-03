@@ -21,8 +21,8 @@ Long press B cycles brightness.
 3. `HOST`: selected host metric detail with CPU, RAM, rootfs, uptime, load, and guest count.
 4. `SYSTEM`: selected host system detail with CPU model, GPU summary when Proxmox exposes it, PVE version, and kernel.
 5. `STORAGE`: selected storage detail with plugin type, status, content, shared flag, used/total and alert color.
-6. `GUESTS`: paged compact VM/LXC list with CPU/RAM/disk.
-7. `DETAIL`: selected VM/LXC detail with CPU cores, RAM, disk, uptime in the context line, network, disk IO, and first tag when present.
+6. `GUESTS`: paged compact VM/LXC list with VMID, CPU/RAM/disk.
+7. `DETAIL`: selected VM/LXC detail with VMID, CPU cores, RAM, disk, uptime in the context line, network, disk IO, and first tag when present.
 8. `ALERTS`: paged active warnings and critical issues.
 9. `DEVICE`: Wi-Fi, device IP, bridge status and firmware version.
 

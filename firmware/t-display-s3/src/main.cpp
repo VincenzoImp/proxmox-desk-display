@@ -24,7 +24,7 @@ constexpr size_t MAX_HOSTS = 12;
 constexpr size_t MAX_STORAGES = 24;
 constexpr size_t MAX_GUESTS = 24;
 constexpr size_t MAX_ALERTS = 12;
-constexpr size_t JSON_DOC_CAPACITY = 32768;
+constexpr size_t JSON_DOC_CAPACITY = 49152;
 constexpr int LIST_ROW_H = 14;
 
 TFT_eSPI tft;
@@ -89,6 +89,7 @@ struct Storage {
 };
 
 struct Guest {
+  String vmid;
   String name;
   String type;
   String hostName;
@@ -497,6 +498,7 @@ bool parseState(const String &payload) {
   for (JsonObject g : doc["guests"].as<JsonArray>()) {
     if (state.guestCount >= MAX_GUESTS) break;
     Guest &guest = state.guests[state.guestCount++];
+    guest.vmid = g["vmid"] | "";
     guest.name = g["name"] | "";
     guest.type = g["type"] | "";
     guest.hostName = g["host_name"] | "";
@@ -938,7 +940,7 @@ void drawGuests() {
     tft.setTextColor(colorForHealth(g.health), rowBg);
     tft.drawString(g.status == "running" ? "RUN" : "STOP", 10, y);
     tft.setTextColor(TFT_WHITE, rowBg);
-    String label = g.name;
+    String label = g.vmid.length() ? g.vmid + " " + g.name : g.name;
     if (label.length() > 18) label = label.substring(0, 18);
     tft.drawString(label, 43, y);
     tft.setTextColor(TFT_LIGHTGREY, rowBg);
@@ -975,7 +977,9 @@ void drawGuestDetail() {
   tft.setTextDatum(TL_DATUM);
 
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  String where = g.type + "  " + g.hostName + "  up " + formatUptime(g.uptime);
+  String where = g.type;
+  if (g.vmid.length() > 0) where += " " + g.vmid;
+  where += "  " + g.hostName + "  up " + formatUptime(g.uptime);
   if (g.tags.length() > 0) {
     where += "  #" + g.tags.substring(0, g.tags.indexOf(";") >= 0 ? g.tags.indexOf(";") : g.tags.length());
   }
