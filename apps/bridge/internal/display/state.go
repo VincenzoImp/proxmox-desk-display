@@ -49,18 +49,31 @@ type Host struct {
 }
 
 type Guest struct {
-	ID        string `json:"id"`
-	VMID      string `json:"vmid"`
-	Name      string `json:"name"`
-	Type      string `json:"type"`
-	HostID    string `json:"host_id"`
-	SourceID  string `json:"source_id"`
-	Status    string `json:"status"`
-	CPUPct    int    `json:"cpu_pct"`
-	MemoryPct int    `json:"memory_pct"`
-	Pinned    bool   `json:"pinned"`
-	Expected  string `json:"expected,omitempty"`
-	Health    Health `json:"health"`
+	ID               string `json:"id"`
+	VMID             string `json:"vmid"`
+	Name             string `json:"name"`
+	Type             string `json:"type"`
+	HostID           string `json:"host_id"`
+	HostName         string `json:"host_name"`
+	SourceID         string `json:"source_id"`
+	Status           string `json:"status"`
+	CPUPct           int    `json:"cpu_pct"`
+	MaxCPU           int    `json:"max_cpu"`
+	MemoryPct        int    `json:"memory_pct"`
+	MemoryUsedBytes  int64  `json:"memory_used_bytes"`
+	MemoryTotalBytes int64  `json:"memory_total_bytes"`
+	DiskPct          int    `json:"disk_pct"`
+	DiskUsedBytes    int64  `json:"disk_used_bytes"`
+	DiskTotalBytes   int64  `json:"disk_total_bytes"`
+	UptimeSec        int64  `json:"uptime_sec"`
+	NetInBytes       int64  `json:"net_in_bytes"`
+	NetOutBytes      int64  `json:"net_out_bytes"`
+	DiskReadBytes    int64  `json:"disk_read_bytes"`
+	DiskWriteBytes   int64  `json:"disk_write_bytes"`
+	Tags             string `json:"tags,omitempty"`
+	Pinned           bool   `json:"pinned"`
+	Expected         string `json:"expected,omitempty"`
+	Health           Health `json:"health"`
 }
 
 type Alert struct {

@@ -17,6 +17,7 @@ constexpr uint8_t BTN_B = 14;  // LILYGO user button
 constexpr uint8_t BACKLIGHT_PIN = 38;
 constexpr unsigned long POLL_MS = 10000;
 constexpr unsigned long BUTTON_LONG_MS = 1200;
+constexpr uint8_t SCREEN_COUNT = 5;
 constexpr size_t MAX_HOSTS = 6;
 constexpr size_t MAX_GUESTS = 10;
 constexpr size_t MAX_ALERTS = 8;
@@ -59,7 +60,21 @@ struct Host {
 struct Guest {
   String name;
   String type;
+  String hostName;
   String status;
+  int cpu = 0;
+  int maxCPU = 0;
+  int memory = 0;
+  int disk = 0;
+  int64_t memoryUsed = 0;
+  int64_t memoryTotal = 0;
+  int64_t diskUsed = 0;
+  int64_t diskTotal = 0;
+  int64_t uptime = 0;
+  int64_t netIn = 0;
+  int64_t netOut = 0;
+  int64_t diskRead = 0;
+  int64_t diskWrite = 0;
   bool pinned = false;
   String health = "unknown";
 };
@@ -90,6 +105,7 @@ String deviceIP;
 unsigned long lastPoll = 0;
 unsigned long lastOK = 0;
 uint8_t screenIndex = 0;
+size_t selectedGuest = 0;
 
 struct ButtonState {
   bool previous = false;
@@ -122,6 +138,31 @@ String trimTrailingSlash(String value) {
   return value;
 }
 
+String formatBytes(int64_t bytes) {
+  if (bytes <= 0) return "-";
+  const double gib = 1024.0 * 1024.0 * 1024.0;
+  const double mib = 1024.0 * 1024.0;
+  if (bytes >= static_cast<int64_t>(gib)) {
+    double value = bytes / gib;
+    if (value >= 10.0) return String(static_cast<int>(round(value))) + "G";
+    return String(value, 1) + "G";
+  }
+  if (bytes >= static_cast<int64_t>(mib)) {
+    return String(static_cast<int>(round(bytes / mib))) + "M";
+  }
+  return String(bytes / 1024) + "K";
+}
+
+String formatUptime(int64_t seconds) {
+  if (seconds <= 0) return "-";
+  int64_t days = seconds / 86400;
+  int64_t hours = (seconds % 86400) / 3600;
+  int64_t minutes = (seconds % 3600) / 60;
+  if (days > 0) return String(days) + "d " + String(hours) + "h";
+  if (hours > 0) return String(hours) + "h " + String(minutes) + "m";
+  return String(minutes) + "m";
+}
+
 void setBacklight(uint8_t brightness) {
   pinMode(BACKLIGHT_PIN, OUTPUT);
   analogWrite(BACKLIGHT_PIN, brightness);
@@ -146,7 +187,7 @@ void drawFooter() {
   String sync = lastOK == 0 ? "never" : String((millis() - lastOK) / 1000) + "s ago";
   tft.drawString("sync " + sync, 8, tft.height() - 14);
   tft.setTextDatum(TR_DATUM);
-  tft.drawString(String(screenIndex + 1) + "/4", tft.width() - 8, tft.height() - 14);
+  tft.drawString(String(screenIndex + 1) + "/" + String(SCREEN_COUNT), tft.width() - 8, tft.height() - 14);
   tft.setTextDatum(TL_DATUM);
 }
 
@@ -314,9 +355,29 @@ bool parseState(const String &payload) {
     Guest &guest = state.guests[state.guestCount++];
     guest.name = g["name"] | "";
     guest.type = g["type"] | "";
+    guest.hostName = g["host_name"] | "";
     guest.status = g["status"] | "";
+    guest.cpu = g["cpu_pct"] | 0;
+    guest.maxCPU = g["max_cpu"] | 0;
+    guest.memory = g["memory_pct"] | 0;
+    guest.disk = g["disk_pct"] | 0;
+    guest.memoryUsed = g["memory_used_bytes"] | 0;
+    guest.memoryTotal = g["memory_total_bytes"] | 0;
+    guest.diskUsed = g["disk_used_bytes"] | 0;
+    guest.diskTotal = g["disk_total_bytes"] | 0;
+    guest.uptime = g["uptime_sec"] | 0;
+    guest.netIn = g["net_in_bytes"] | 0;
+    guest.netOut = g["net_out_bytes"] | 0;
+    guest.diskRead = g["disk_read_bytes"] | 0;
+    guest.diskWrite = g["disk_write_bytes"] | 0;
     guest.pinned = g["pinned"] | false;
     guest.health = g["health"] | "unknown";
+  }
+
+  if (state.guestCount == 0) {
+    selectedGuest = 0;
+  } else if (selectedGuest >= state.guestCount) {
+    selectedGuest = state.guestCount - 1;
   }
 
   for (JsonObject a : doc["alerts"].as<JsonArray>()) {
@@ -398,23 +459,93 @@ void drawOverview() {
 void drawGuests() {
   drawHeader("GUESTS", state.summary.health);
   tft.setTextSize(1);
-  int y = 40;
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("B selects  A screen", 10, 38);
+  tft.drawString("CPU RAM DSK", 214, 38);
+  int y = 52;
   if (state.guestCount == 0) {
     tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
     tft.drawString("No guests in display state", 10, y);
   }
   for (size_t i = 0; i < state.guestCount && y < tft.height() - 18; ++i) {
     Guest &g = state.guests[i];
-    tft.setTextColor(colorForHealth(g.health), TFT_BLACK);
+    uint16_t rowBg = i == selectedGuest ? TFT_DARKGREY : TFT_BLACK;
+    if (i == selectedGuest) tft.fillRect(6, y - 1, tft.width() - 12, 13, rowBg);
+    tft.setTextColor(colorForHealth(g.health), rowBg);
     tft.drawString(g.status == "running" ? "RUN" : "STOP", 10, y);
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextColor(TFT_WHITE, rowBg);
     String label = g.name;
-    if (label.length() > 24) label = label.substring(0, 24);
-    tft.drawString(label, 54, y);
-    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    tft.drawString(g.type, 250, y);
+    if (label.length() > 18) label = label.substring(0, 18);
+    tft.drawString(label, 43, y);
+    tft.setTextColor(TFT_LIGHTGREY, rowBg);
+    tft.drawString(String(g.cpu), 216, y);
+    tft.drawString(String(g.memory), 250, y);
+    tft.drawString(String(g.disk), 286, y);
     y += 14;
   }
+  drawFooter();
+}
+
+void drawGuestDetail() {
+  drawHeader("DETAIL", state.summary.health);
+  tft.setTextSize(1);
+  if (state.guestCount == 0) {
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString("No guest selected", 10, 42);
+    drawFooter();
+    return;
+  }
+
+  Guest &g = state.guests[selectedGuest];
+  tft.setTextColor(colorForHealth(g.health), TFT_BLACK);
+  tft.drawString(g.status == "running" ? "RUNNING" : g.status, 10, 38);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  String title = g.name;
+  if (title.length() > 27) title = title.substring(0, 27);
+  tft.drawString(title, 86, 38);
+
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  String where = g.type + "  " + g.hostName;
+  if (where.length() > 42) where = where.substring(0, 42);
+  tft.drawString(where, 10, 54);
+
+  int y = 74;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("CPU", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(String(g.cpu) + "% / " + String(g.maxCPU) + " cores", 92, y);
+  drawBar(205, y, 85, 8, g.cpu, TFT_CYAN);
+
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("RAM", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(formatBytes(g.memoryUsed) + " / " + formatBytes(g.memoryTotal), 92, y);
+  drawBar(205, y, 85, 8, g.memory, TFT_GREEN);
+
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("DISK", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(formatBytes(g.diskUsed) + " / " + formatBytes(g.diskTotal), 92, y);
+  drawBar(205, y, 85, 8, g.disk, TFT_YELLOW);
+
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("UP", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(formatUptime(g.uptime), 92, y);
+
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("NET", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(formatBytes(g.netIn) + " in  " + formatBytes(g.netOut) + " out", 92, y);
+
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(selectedGuest + 1) + "/" + String(state.guestCount) + "  B next", tft.width() - 8, 54);
+  tft.setTextDatum(TL_DATUM);
   drawFooter();
 }
 
@@ -488,6 +619,9 @@ void render() {
       drawGuests();
       break;
     case 2:
+      drawGuestDetail();
+      break;
+    case 3:
       drawAlerts();
       break;
     default:
@@ -522,18 +656,32 @@ void pollButton(uint8_t pin, ButtonState &button, void (*shortPress)(), void (*l
 }
 
 void nextScreen() {
-  screenIndex = (screenIndex + 1) % 4;
+  screenIndex = (screenIndex + 1) % SCREEN_COUNT;
   render();
 }
 
 void prevScreen() {
-  screenIndex = screenIndex == 0 ? 3 : screenIndex - 1;
+  screenIndex = screenIndex == 0 ? SCREEN_COUNT - 1 : screenIndex - 1;
+  render();
+}
+
+void nextGuest() {
+  if (state.guestCount == 0) return;
+  selectedGuest = (selectedGuest + 1) % state.guestCount;
   render();
 }
 
 void manualRefresh() {
   fetchState();
   render();
+}
+
+void buttonBShort() {
+  if (screenIndex == 1 || screenIndex == 2) {
+    nextGuest();
+    return;
+  }
+  manualRefresh();
 }
 
 void factoryReset() {
@@ -554,7 +702,7 @@ void handleButtons() {
     }
   }
   pollButton(BTN_A, buttonA, nextScreen, prevScreen);
-  pollButton(BTN_B, buttonB, manualRefresh, toggleBrightness);
+  pollButton(BTN_B, buttonB, buttonBShort, toggleBrightness);
 }
 
 }  // namespace

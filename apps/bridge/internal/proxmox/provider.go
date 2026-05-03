@@ -164,18 +164,31 @@ func (c *Collector) collectSource(ctx context.Context, client *Client) (display.
 		pin, pinned := c.pinned[client.id+"/"+vmid]
 		name := firstNonEmpty(pin.Label, r.Name, vmid)
 		guest := display.Guest{
-			ID:        guestID,
-			VMID:      vmid,
-			Name:      name,
-			Type:      r.Type,
-			HostID:    hostID,
-			SourceID:  client.id,
-			Status:    firstNonEmpty(r.Status, "unknown"),
-			CPUPct:    pctFloat(r.CPU),
-			MemoryPct: pctInt64(r.Mem, r.MaxMem),
-			Pinned:    pinned,
-			Expected:  pin.Expected,
-			Health:    display.HealthOK,
+			ID:               guestID,
+			VMID:             vmid,
+			Name:             name,
+			Type:             r.Type,
+			HostID:           hostID,
+			HostName:         displayName(client.name, r.Node),
+			SourceID:         client.id,
+			Status:           firstNonEmpty(r.Status, "unknown"),
+			CPUPct:           pctFloat(r.CPU),
+			MaxCPU:           r.MaxCPU,
+			MemoryPct:        pctInt64(r.Mem, r.MaxMem),
+			MemoryUsedBytes:  r.Mem,
+			MemoryTotalBytes: r.MaxMem,
+			DiskPct:          pctInt64(r.Disk, r.MaxDisk),
+			DiskUsedBytes:    r.Disk,
+			DiskTotalBytes:   r.MaxDisk,
+			UptimeSec:        r.Uptime,
+			NetInBytes:       r.NetIn,
+			NetOutBytes:      r.NetOut,
+			DiskReadBytes:    r.DiskRead,
+			DiskWriteBytes:   r.DiskWrite,
+			Tags:             r.Tags,
+			Pinned:           pinned,
+			Expected:         pin.Expected,
+			Health:           display.HealthOK,
 		}
 		if pinned && pin.Expected != "" && guest.Status != pin.Expected {
 			guest.Health = display.HealthWarning
@@ -255,18 +268,24 @@ func alertForHost(host display.Host, severity display.Health, title string, mess
 }
 
 type resource struct {
-	ID      string  `json:"id"`
-	Type    string  `json:"type"`
-	Node    string  `json:"node"`
-	Name    string  `json:"name"`
-	Status  string  `json:"status"`
-	VMID    int     `json:"vmid"`
-	CPU     float64 `json:"cpu"`
-	Mem     int64   `json:"mem"`
-	MaxMem  int64   `json:"maxmem"`
-	Disk    int64   `json:"disk"`
-	MaxDisk int64   `json:"maxdisk"`
-	Uptime  int64   `json:"uptime"`
+	ID        string  `json:"id"`
+	Type      string  `json:"type"`
+	Node      string  `json:"node"`
+	Name      string  `json:"name"`
+	Status    string  `json:"status"`
+	VMID      int     `json:"vmid"`
+	CPU       float64 `json:"cpu"`
+	MaxCPU    int     `json:"maxcpu"`
+	Mem       int64   `json:"mem"`
+	MaxMem    int64   `json:"maxmem"`
+	Disk      int64   `json:"disk"`
+	MaxDisk   int64   `json:"maxdisk"`
+	Uptime    int64   `json:"uptime"`
+	NetIn     int64   `json:"netin"`
+	NetOut    int64   `json:"netout"`
+	DiskRead  int64   `json:"diskread"`
+	DiskWrite int64   `json:"diskwrite"`
+	Tags      string  `json:"tags"`
 }
 
 type nodeStatus struct {
