@@ -184,6 +184,17 @@ func (MockCollector) Collect(context.Context) (display.State, error) {
 			Health:            display.HealthWarning,
 		},
 	}
+	state.Clusters = []display.Cluster{
+		{
+			ID:          "mock",
+			SourceID:    "mock",
+			Name:        "Mock Cluster",
+			Quorate:     true,
+			NodesOnline: 2,
+			NodesTotal:  2,
+			Health:      display.HealthOK,
+		},
+	}
 	state.Storages = []display.Storage{
 		{
 			ID:             "mock/lab-a/local",
@@ -214,6 +225,49 @@ func (MockCollector) Collect(context.Context) (display.State, error) {
 			DiskUsedBytes:  880468295680,
 			DiskTotalBytes: 1073741824000,
 			Health:         display.HealthWarning,
+		},
+	}
+	state.Networks = []display.Network{
+		{
+			ID:        "mock/lab-a/vmbr0",
+			SourceID:  "mock",
+			HostID:    "mock/lab-a",
+			HostName:  "Lab A",
+			Node:      "lab-a",
+			Iface:     "vmbr0",
+			Type:      "bridge",
+			Active:    true,
+			Autostart: true,
+			Address:   "192.168.1.10",
+			Health:    display.HealthOK,
+		},
+	}
+	state.Services = []display.Service{
+		{
+			ID:        "mock/lab-b/pvedaemon",
+			SourceID:  "mock",
+			HostID:    "mock/lab-b",
+			HostName:  "Lab B",
+			Node:      "lab-b",
+			Name:      "pvedaemon",
+			State:     "running",
+			UnitState: "active",
+			Health:    display.HealthOK,
+		},
+	}
+	state.ZFSPools = []display.ZFSPool{
+		{
+			ID:             "mock/lab-b/datapool",
+			SourceID:       "mock",
+			HostID:         "mock/lab-b",
+			HostName:       "Lab B",
+			Node:           "lab-b",
+			Name:           "datapool",
+			HealthText:     "ONLINE",
+			SizeBytes:      1073741824000,
+			AllocatedBytes: 880468295680,
+			FreeBytes:      193273528320,
+			Health:         display.HealthOK,
 		},
 	}
 	state.Disks = []display.Disk{
@@ -295,12 +349,37 @@ func (MockCollector) Collect(context.Context) (display.State, error) {
 			UptimeSec:        98765,
 			OSType:           "l26",
 			IPAddress:        "192.168.1.50/24",
+			IPAddresses:      []string{"192.168.1.50/24"},
 			AgentEnabled:     true,
+			AgentAvailable:   true,
+			AgentHostname:    "docker",
+			AgentOS:          "Debian GNU/Linux",
 			OnBoot:           true,
 			Protection:       true,
-			Pinned:           true,
-			Expected:         "running",
-			Health:           display.HealthOK,
+			Disks: []display.GuestDisk{
+				{Name: "scsi0", Storage: "datapool", Volume: "datapool:vm-101-disk-0", Size: "100G", Backup: true},
+			},
+			NICs: []display.GuestNIC{
+				{Name: "net0", Model: "virtio", MAC: "AA:BB:CC:DD:EE:FF", Bridge: "vmbr0", Firewall: true},
+			},
+			Pinned:   true,
+			Expected: "running",
+			Health:   display.HealthOK,
+		},
+	}
+	state.Snapshots = []display.Snapshot{
+		{
+			ID:        "mock/101/before-upgrade",
+			SourceID:  "mock",
+			HostID:    "mock/lab-b",
+			HostName:  "Lab B",
+			GuestID:   "mock/101",
+			GuestName: "Docker",
+			VMID:      "101",
+			Type:      "qemu",
+			Name:      "before-upgrade",
+			SnapTime:  now - 86400,
+			Health:    display.HealthOK,
 		},
 	}
 	state.Tasks = []display.Task{
@@ -339,6 +418,83 @@ func (MockCollector) Collect(context.Context) (display.State, error) {
 			EndedAt:       now - 880,
 			DurationSec:   20,
 			Health:        display.HealthOK,
+		},
+	}
+	state.BackupJobs = []display.BackupJob{
+		{
+			ID:       "mock/backup-nightly",
+			SourceID: "mock",
+			Storage:  "backup",
+			Schedule: "02:00",
+			Mode:     "snapshot",
+			Enabled:  true,
+			All:      true,
+			Compress: "zstd",
+			Health:   display.HealthOK,
+		},
+	}
+	state.Replications = []display.Replication{
+		{
+			ID:         "mock/101-0",
+			SourceID:   "mock",
+			GuestID:    "mock/101",
+			GuestName:  "Docker",
+			VMID:       "101",
+			SourceNode: "lab-b",
+			TargetNode: "lab-a",
+			Schedule:   "*/15",
+			Enabled:    true,
+			LastSync:   now - 600,
+			Health:     display.HealthOK,
+		},
+	}
+	state.HAResources = []display.HAResource{
+		{
+			ID:       "mock/vm:101",
+			SourceID: "mock",
+			SID:      "vm:101",
+			Type:     "vm",
+			State:    "started",
+			Node:     "lab-b",
+			Health:   display.HealthOK,
+		},
+	}
+	state.Updates = []display.Update{
+		{
+			ID:               "mock/lab-a/pve-manager",
+			SourceID:         "mock",
+			HostID:           "mock/lab-a",
+			HostName:         "Lab A",
+			Node:             "lab-a",
+			Package:          "pve-manager",
+			CurrentVersion:   "9.1.1",
+			CandidateVersion: "9.1.2",
+			Health:           display.HealthWarning,
+		},
+	}
+	state.Repositories = []display.Repository{
+		{
+			ID:       "mock/lab-a/pve-enterprise",
+			SourceID: "mock",
+			HostID:   "mock/lab-a",
+			HostName: "Lab A",
+			Node:     "lab-a",
+			File:     "/etc/apt/sources.list.d/pve-enterprise.list",
+			Enabled:  false,
+			Status:   "ok",
+			Health:   display.HealthOK,
+		},
+	}
+	state.Subscriptions = []display.Subscription{
+		{
+			ID:          "mock/lab-a",
+			SourceID:    "mock",
+			HostID:      "mock/lab-a",
+			HostName:    "Lab A",
+			Node:        "lab-a",
+			Status:      "active",
+			ProductName: "Proxmox VE",
+			Health:      display.HealthOK,
 		},
 	}
 	return display.Finalize(state), nil

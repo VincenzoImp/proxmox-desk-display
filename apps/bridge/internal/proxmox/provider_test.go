@@ -48,6 +48,8 @@ func TestApplyGuestConfig(t *testing.T) {
 		"onboot":     "1",
 		"protection": float64(1),
 		"ipconfig0":  "ip=192.168.1.50/24,gw=192.168.1.1",
+		"scsi0":      "local-lvm:vm-100-disk-0,size=50G,ssd=1,backup=1",
+		"net0":       "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0,firewall=1,tag=20",
 	})
 	if guest.MaxCPU != 4 || guest.MemoryTotalBytes != 8192*1024*1024 {
 		t.Fatalf("guest resources not applied: %#v", guest)
@@ -57,5 +59,43 @@ func TestApplyGuestConfig(t *testing.T) {
 	}
 	if guest.OSType != "l26" || guest.IPAddress != "192.168.1.50/24" {
 		t.Fatalf("guest identity config not applied: %#v", guest)
+	}
+	if len(guest.Disks) != 1 || guest.Disks[0].Storage != "local-lvm" || !guest.Disks[0].SSD || !guest.Disks[0].Backup {
+		t.Fatalf("guest disks not applied: %#v", guest.Disks)
+	}
+	if len(guest.NICs) != 1 || guest.NICs[0].Bridge != "vmbr0" || guest.NICs[0].MAC != "AA:BB:CC:DD:EE:FF" {
+		t.Fatalf("guest NICs not applied: %#v", guest.NICs)
+	}
+}
+
+func TestAgentIPAddresses(t *testing.T) {
+	got := agentIPAddresses(agentNetworkInterfaces{Result: []struct {
+		Name            string `json:"name"`
+		HardwareAddress string `json:"hardware-address"`
+		IPAddresses     []struct {
+			IPAddress     string `json:"ip-address"`
+			IPAddressType string `json:"ip-address-type"`
+			Prefix        int    `json:"prefix"`
+		} `json:"ip-addresses"`
+	}{
+		{
+			Name: "lo",
+			IPAddresses: []struct {
+				IPAddress     string `json:"ip-address"`
+				IPAddressType string `json:"ip-address-type"`
+				Prefix        int    `json:"prefix"`
+			}{{IPAddress: "127.0.0.1", Prefix: 8}},
+		},
+		{
+			Name: "eth0",
+			IPAddresses: []struct {
+				IPAddress     string `json:"ip-address"`
+				IPAddressType string `json:"ip-address-type"`
+				Prefix        int    `json:"prefix"`
+			}{{IPAddress: "192.168.1.50", Prefix: 24}},
+		},
+	}})
+	if len(got) != 1 || got[0] != "192.168.1.50/24" {
+		t.Fatalf("agentIPAddresses = %#v", got)
 	}
 }

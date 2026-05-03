@@ -49,11 +49,22 @@ Response:
     "guests_stopped": 3,
     "alerts": 0
   },
+  "clusters": [],
   "hosts": [],
   "storages": [],
   "disks": [],
+  "networks": [],
+  "services": [],
+  "zfs_pools": [],
   "guests": [],
+  "snapshots": [],
   "tasks": [],
+  "backup_jobs": [],
+  "replications": [],
+  "ha_resources": [],
+  "updates": [],
+  "repositories": [],
+  "subscriptions": [],
   "alerts": []
 }
 ```
@@ -134,7 +145,9 @@ Disk objects are collected from Proxmox node disk inventory:
 }
 ```
 
-Guest objects include both utilization and allocated resources:
+Network, service, ZFS, repository, update, subscription, backup, replication, HA, and snapshot collections are also emitted when Proxmox exposes them to the configured API token. If an endpoint is unavailable because of permissions, missing subsystem configuration, or Proxmox edition/version differences, the affected host or cluster includes a `data_warnings` entry instead of failing the whole refresh.
+
+Guest objects include both utilization, allocated resources, parsed config devices, and QEMU Guest Agent data when the agent is enabled and reachable:
 
 ```json
 {
@@ -160,11 +173,42 @@ Guest objects include both utilization and allocated resources:
   "disk_write_bytes": 215348330496,
   "os_type": "l26",
   "ip_address": "192.168.1.50/24",
+  "ip_addresses": ["192.168.1.50/24"],
   "agent_enabled": true,
+  "agent_available": true,
+  "agent_hostname": "docker",
+  "agent_os": "Debian GNU/Linux",
   "onboot": true,
   "protection": false,
   "template": false,
-  "unprivileged": false
+  "unprivileged": false,
+  "disks": [
+    {
+      "name": "scsi0",
+      "storage": "datapool",
+      "volume": "datapool:vm-100-disk-0",
+      "size": "50G",
+      "backup": true
+    }
+  ],
+  "nics": [
+    {
+      "name": "net0",
+      "model": "virtio",
+      "bridge": "vmbr0",
+      "mac": "AA:BB:CC:DD:EE:FF",
+      "firewall": true
+    }
+  ],
+  "filesystems": [
+    {
+      "name": "sda1",
+      "mountpoint": "/",
+      "type": "ext4",
+      "used_bytes": 1234,
+      "total_bytes": 5678
+    }
+  ]
 }
 ```
 

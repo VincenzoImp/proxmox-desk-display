@@ -14,16 +14,27 @@ const (
 )
 
 type State struct {
-	Schema      string    `json:"schema"`
-	GeneratedAt time.Time `json:"generated_at"`
-	Stale       bool      `json:"stale"`
-	Summary     Summary   `json:"summary"`
-	Hosts       []Host    `json:"hosts"`
-	Storages    []Storage `json:"storages"`
-	Disks       []Disk    `json:"disks"`
-	Guests      []Guest   `json:"guests"`
-	Tasks       []Task    `json:"tasks"`
-	Alerts      []Alert   `json:"alerts"`
+	Schema        string         `json:"schema"`
+	GeneratedAt   time.Time      `json:"generated_at"`
+	Stale         bool           `json:"stale"`
+	Summary       Summary        `json:"summary"`
+	Clusters      []Cluster      `json:"clusters"`
+	Hosts         []Host         `json:"hosts"`
+	Storages      []Storage      `json:"storages"`
+	Disks         []Disk         `json:"disks"`
+	Networks      []Network      `json:"networks"`
+	Services      []Service      `json:"services"`
+	ZFSPools      []ZFSPool      `json:"zfs_pools"`
+	Guests        []Guest        `json:"guests"`
+	Snapshots     []Snapshot     `json:"snapshots"`
+	Tasks         []Task         `json:"tasks"`
+	BackupJobs    []BackupJob    `json:"backup_jobs"`
+	Replications  []Replication  `json:"replications"`
+	HAResources   []HAResource   `json:"ha_resources"`
+	Updates       []Update       `json:"updates"`
+	Repositories  []Repository   `json:"repositories"`
+	Subscriptions []Subscription `json:"subscriptions"`
+	Alerts        []Alert        `json:"alerts"`
 }
 
 type Summary struct {
@@ -33,47 +44,63 @@ type Summary struct {
 	GuestsRunning int    `json:"guests_running"`
 	GuestsStopped int    `json:"guests_stopped"`
 	Alerts        int    `json:"alerts"`
+	Updates       int    `json:"updates"`
+}
+
+type Cluster struct {
+	ID            string   `json:"id"`
+	SourceID      string   `json:"source_id"`
+	Name          string   `json:"name,omitempty"`
+	Version       int      `json:"version,omitempty"`
+	Quorate       bool     `json:"quorate"`
+	NodesOnline   int      `json:"nodes_online"`
+	NodesTotal    int      `json:"nodes_total"`
+	NodesExpected int      `json:"nodes_expected,omitempty"`
+	Health        Health   `json:"health"`
+	DataWarnings  []string `json:"data_warnings,omitempty"`
 }
 
 type Host struct {
-	ID                string   `json:"id"`
-	Name              string   `json:"name"`
-	SourceID          string   `json:"source_id"`
-	Node              string   `json:"node"`
-	Online            bool     `json:"online"`
-	CPUPct            int      `json:"cpu_pct"`
-	MaxCPU            int      `json:"max_cpu"`
-	CPUModel          string   `json:"cpu_model,omitempty"`
-	GPUCount          int      `json:"gpu_count,omitempty"`
-	GPUSummary        string   `json:"gpu_summary,omitempty"`
-	MemoryPct         int      `json:"memory_pct"`
-	MemoryUsedBytes   int64    `json:"memory_used_bytes"`
-	MemoryTotalBytes  int64    `json:"memory_total_bytes"`
-	StoragePct        int      `json:"storage_pct"`
-	StorageUsedBytes  int64    `json:"storage_used_bytes"`
-	StorageTotalBytes int64    `json:"storage_total_bytes"`
-	StorageMaxPct     int      `json:"storage_max_pct"`
-	StorageMaxName    string   `json:"storage_max_name,omitempty"`
-	UptimeSec         int64    `json:"uptime_sec"`
-	LoadAvg           []string `json:"load_avg,omitempty"`
-	PVEVersion        string   `json:"pve_version,omitempty"`
-	KernelVersion     string   `json:"kernel_version,omitempty"`
-	PrimaryAddress    string   `json:"primary_address,omitempty"`
-	NetworkActive     int      `json:"network_active"`
-	NetworkTotal      int      `json:"network_total"`
-	ServicesRunning   int      `json:"services_running"`
-	ServicesFailed    int      `json:"services_failed"`
-	ServicesTotal     int      `json:"services_total"`
-	DiskCount         int      `json:"disk_count"`
-	DiskIssues        int      `json:"disk_issues"`
-	FailedTasks24h    int      `json:"failed_tasks_24h"`
-	LastBackupStatus  string   `json:"last_backup_status,omitempty"`
-	LastBackupAgeSec  int64    `json:"last_backup_age_sec,omitempty"`
-	DataWarnings      []string `json:"data_warnings,omitempty"`
-	GuestsRunning     int      `json:"guests_running"`
-	GuestsStopped     int      `json:"guests_stopped"`
-	Health            Health   `json:"health"`
-	Error             *string  `json:"error"`
+	ID                 string   `json:"id"`
+	Name               string   `json:"name"`
+	SourceID           string   `json:"source_id"`
+	Node               string   `json:"node"`
+	Online             bool     `json:"online"`
+	CPUPct             int      `json:"cpu_pct"`
+	MaxCPU             int      `json:"max_cpu"`
+	CPUModel           string   `json:"cpu_model,omitempty"`
+	GPUCount           int      `json:"gpu_count,omitempty"`
+	GPUSummary         string   `json:"gpu_summary,omitempty"`
+	MemoryPct          int      `json:"memory_pct"`
+	MemoryUsedBytes    int64    `json:"memory_used_bytes"`
+	MemoryTotalBytes   int64    `json:"memory_total_bytes"`
+	StoragePct         int      `json:"storage_pct"`
+	StorageUsedBytes   int64    `json:"storage_used_bytes"`
+	StorageTotalBytes  int64    `json:"storage_total_bytes"`
+	StorageMaxPct      int      `json:"storage_max_pct"`
+	StorageMaxName     string   `json:"storage_max_name,omitempty"`
+	UptimeSec          int64    `json:"uptime_sec"`
+	LoadAvg            []string `json:"load_avg,omitempty"`
+	PVEVersion         string   `json:"pve_version,omitempty"`
+	KernelVersion      string   `json:"kernel_version,omitempty"`
+	PrimaryAddress     string   `json:"primary_address,omitempty"`
+	NetworkActive      int      `json:"network_active"`
+	NetworkTotal       int      `json:"network_total"`
+	ServicesRunning    int      `json:"services_running"`
+	ServicesFailed     int      `json:"services_failed"`
+	ServicesTotal      int      `json:"services_total"`
+	UpdatesAvailable   int      `json:"updates_available"`
+	SubscriptionStatus string   `json:"subscription_status,omitempty"`
+	DiskCount          int      `json:"disk_count"`
+	DiskIssues         int      `json:"disk_issues"`
+	FailedTasks24h     int      `json:"failed_tasks_24h"`
+	LastBackupStatus   string   `json:"last_backup_status,omitempty"`
+	LastBackupAgeSec   int64    `json:"last_backup_age_sec,omitempty"`
+	DataWarnings       []string `json:"data_warnings,omitempty"`
+	GuestsRunning      int      `json:"guests_running"`
+	GuestsStopped      int      `json:"guests_stopped"`
+	Health             Health   `json:"health"`
+	Error              *string  `json:"error"`
 }
 
 type Storage struct {
@@ -110,40 +137,153 @@ type Disk struct {
 	Health      Health `json:"health"`
 }
 
-type Guest struct {
+type Network struct {
+	ID          string `json:"id"`
+	SourceID    string `json:"source_id"`
+	HostID      string `json:"host_id"`
+	HostName    string `json:"host_name"`
+	Node        string `json:"node"`
+	Iface       string `json:"iface"`
+	Type        string `json:"type,omitempty"`
+	Active      bool   `json:"active"`
+	Autostart   bool   `json:"autostart"`
+	Method      string `json:"method,omitempty"`
+	Address     string `json:"address,omitempty"`
+	CIDR        string `json:"cidr,omitempty"`
+	Gateway     string `json:"gateway,omitempty"`
+	BridgePorts string `json:"bridge_ports,omitempty"`
+	Slaves      string `json:"slaves,omitempty"`
+	VLANAware   bool   `json:"vlan_aware,omitempty"`
+	Comments    string `json:"comments,omitempty"`
+	Health      Health `json:"health"`
+}
+
+type Service struct {
+	ID          string `json:"id"`
+	SourceID    string `json:"source_id"`
+	HostID      string `json:"host_id"`
+	HostName    string `json:"host_name"`
+	Node        string `json:"node"`
+	Name        string `json:"name"`
+	State       string `json:"state,omitempty"`
+	UnitState   string `json:"unit_state,omitempty"`
+	Description string `json:"description,omitempty"`
+	Health      Health `json:"health"`
+}
+
+type ZFSPool struct {
 	ID               string `json:"id"`
-	VMID             string `json:"vmid"`
-	Name             string `json:"name"`
-	Type             string `json:"type"`
+	SourceID         string `json:"source_id"`
 	HostID           string `json:"host_id"`
 	HostName         string `json:"host_name"`
-	SourceID         string `json:"source_id"`
-	Status           string `json:"status"`
-	CPUPct           int    `json:"cpu_pct"`
-	MaxCPU           int    `json:"max_cpu"`
-	MemoryPct        int    `json:"memory_pct"`
-	MemoryUsedBytes  int64  `json:"memory_used_bytes"`
-	MemoryTotalBytes int64  `json:"memory_total_bytes"`
-	DiskPct          int    `json:"disk_pct"`
-	DiskUsedBytes    int64  `json:"disk_used_bytes"`
-	DiskTotalBytes   int64  `json:"disk_total_bytes"`
-	UptimeSec        int64  `json:"uptime_sec"`
-	NetInBytes       int64  `json:"net_in_bytes"`
-	NetOutBytes      int64  `json:"net_out_bytes"`
-	DiskReadBytes    int64  `json:"disk_read_bytes"`
-	DiskWriteBytes   int64  `json:"disk_write_bytes"`
-	Tags             string `json:"tags,omitempty"`
-	OSType           string `json:"os_type,omitempty"`
-	IPAddress        string `json:"ip_address,omitempty"`
-	AgentEnabled     bool   `json:"agent_enabled"`
-	OnBoot           bool   `json:"onboot"`
-	Protection       bool   `json:"protection"`
-	Template         bool   `json:"template"`
-	Unprivileged     bool   `json:"unprivileged"`
-	ConfigWarning    string `json:"config_warning,omitempty"`
-	Pinned           bool   `json:"pinned"`
-	Expected         string `json:"expected,omitempty"`
+	Node             string `json:"node"`
+	Name             string `json:"name"`
+	HealthText       string `json:"health_text,omitempty"`
+	Status           string `json:"status,omitempty"`
+	SizeBytes        int64  `json:"size_bytes"`
+	AllocatedBytes   int64  `json:"allocated_bytes"`
+	FreeBytes        int64  `json:"free_bytes"`
+	FragmentationPct int    `json:"fragmentation_pct,omitempty"`
+	DedupRatio       string `json:"dedup_ratio,omitempty"`
 	Health           Health `json:"health"`
+}
+
+type Guest struct {
+	ID               string            `json:"id"`
+	VMID             string            `json:"vmid"`
+	Name             string            `json:"name"`
+	Type             string            `json:"type"`
+	HostID           string            `json:"host_id"`
+	HostName         string            `json:"host_name"`
+	SourceID         string            `json:"source_id"`
+	Status           string            `json:"status"`
+	CPUPct           int               `json:"cpu_pct"`
+	MaxCPU           int               `json:"max_cpu"`
+	MemoryPct        int               `json:"memory_pct"`
+	MemoryUsedBytes  int64             `json:"memory_used_bytes"`
+	MemoryTotalBytes int64             `json:"memory_total_bytes"`
+	DiskPct          int               `json:"disk_pct"`
+	DiskUsedBytes    int64             `json:"disk_used_bytes"`
+	DiskTotalBytes   int64             `json:"disk_total_bytes"`
+	UptimeSec        int64             `json:"uptime_sec"`
+	NetInBytes       int64             `json:"net_in_bytes"`
+	NetOutBytes      int64             `json:"net_out_bytes"`
+	DiskReadBytes    int64             `json:"disk_read_bytes"`
+	DiskWriteBytes   int64             `json:"disk_write_bytes"`
+	Tags             string            `json:"tags,omitempty"`
+	OSType           string            `json:"os_type,omitempty"`
+	IPAddress        string            `json:"ip_address,omitempty"`
+	IPAddresses      []string          `json:"ip_addresses,omitempty"`
+	AgentEnabled     bool              `json:"agent_enabled"`
+	AgentAvailable   bool              `json:"agent_available"`
+	AgentHostname    string            `json:"agent_hostname,omitempty"`
+	AgentOS          string            `json:"agent_os,omitempty"`
+	AgentWarning     string            `json:"agent_warning,omitempty"`
+	OnBoot           bool              `json:"onboot"`
+	Protection       bool              `json:"protection"`
+	Template         bool              `json:"template"`
+	Unprivileged     bool              `json:"unprivileged"`
+	CPUType          string            `json:"cpu_type,omitempty"`
+	BIOS             string            `json:"bios,omitempty"`
+	Machine          string            `json:"machine,omitempty"`
+	BootOrder        string            `json:"boot_order,omitempty"`
+	Startup          string            `json:"startup,omitempty"`
+	Nameserver       string            `json:"nameserver,omitempty"`
+	SearchDomain     string            `json:"search_domain,omitempty"`
+	Features         string            `json:"features,omitempty"`
+	Disks            []GuestDisk       `json:"disks,omitempty"`
+	NICs             []GuestNIC        `json:"nics,omitempty"`
+	Filesystems      []GuestFilesystem `json:"filesystems,omitempty"`
+	ConfigWarning    string            `json:"config_warning,omitempty"`
+	Pinned           bool              `json:"pinned"`
+	Expected         string            `json:"expected,omitempty"`
+	Health           Health            `json:"health"`
+}
+
+type GuestDisk struct {
+	Name      string `json:"name"`
+	Storage   string `json:"storage,omitempty"`
+	Volume    string `json:"volume,omitempty"`
+	Size      string `json:"size,omitempty"`
+	Format    string `json:"format,omitempty"`
+	Backup    bool   `json:"backup,omitempty"`
+	Replicate bool   `json:"replicate,omitempty"`
+	SSD       bool   `json:"ssd,omitempty"`
+}
+
+type GuestNIC struct {
+	Name     string `json:"name"`
+	Model    string `json:"model,omitempty"`
+	MAC      string `json:"mac,omitempty"`
+	Bridge   string `json:"bridge,omitempty"`
+	Firewall bool   `json:"firewall,omitempty"`
+	Tag      string `json:"tag,omitempty"`
+	Rate     string `json:"rate,omitempty"`
+}
+
+type GuestFilesystem struct {
+	Name       string `json:"name"`
+	Mountpoint string `json:"mountpoint,omitempty"`
+	Type       string `json:"type,omitempty"`
+	UsedBytes  int64  `json:"used_bytes"`
+	TotalBytes int64  `json:"total_bytes"`
+}
+
+type Snapshot struct {
+	ID          string `json:"id"`
+	SourceID    string `json:"source_id"`
+	HostID      string `json:"host_id"`
+	HostName    string `json:"host_name"`
+	GuestID     string `json:"guest_id"`
+	GuestName   string `json:"guest_name"`
+	VMID        string `json:"vmid"`
+	Type        string `json:"type"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	SnapTime    int64  `json:"snap_time,omitempty"`
+	Parent      string `json:"parent,omitempty"`
+	VMState     bool   `json:"vmstate"`
+	Health      Health `json:"health"`
 }
 
 type Task struct {
@@ -163,6 +303,98 @@ type Task struct {
 	EndedAt       int64  `json:"ended_at,omitempty"`
 	DurationSec   int64  `json:"duration_sec,omitempty"`
 	Health        Health `json:"health"`
+}
+
+type BackupJob struct {
+	ID       string `json:"id"`
+	SourceID string `json:"source_id"`
+	Storage  string `json:"storage,omitempty"`
+	Schedule string `json:"schedule,omitempty"`
+	Mode     string `json:"mode,omitempty"`
+	Enabled  bool   `json:"enabled"`
+	All      bool   `json:"all"`
+	VMIDs    string `json:"vmids,omitempty"`
+	Compress string `json:"compress,omitempty"`
+	MailTo   string `json:"mailto,omitempty"`
+	Health   Health `json:"health"`
+}
+
+type Replication struct {
+	ID         string `json:"id"`
+	SourceID   string `json:"source_id"`
+	GuestID    string `json:"guest_id,omitempty"`
+	GuestName  string `json:"guest_name,omitempty"`
+	VMID       string `json:"vmid,omitempty"`
+	SourceNode string `json:"source_node,omitempty"`
+	TargetNode string `json:"target_node,omitempty"`
+	Schedule   string `json:"schedule,omitempty"`
+	Rate       int64  `json:"rate,omitempty"`
+	Enabled    bool   `json:"enabled"`
+	LastSync   int64  `json:"last_sync,omitempty"`
+	NextSync   int64  `json:"next_sync,omitempty"`
+	Error      string `json:"error,omitempty"`
+	Health     Health `json:"health"`
+}
+
+type HAResource struct {
+	ID           string `json:"id"`
+	SourceID     string `json:"source_id"`
+	SID          string `json:"sid"`
+	Type         string `json:"type,omitempty"`
+	State        string `json:"state,omitempty"`
+	RequestState string `json:"request_state,omitempty"`
+	Group        string `json:"group,omitempty"`
+	Node         string `json:"node,omitempty"`
+	MaxRestart   int    `json:"max_restart,omitempty"`
+	MaxRelocate  int    `json:"max_relocate,omitempty"`
+	Health       Health `json:"health"`
+}
+
+type Update struct {
+	ID               string `json:"id"`
+	SourceID         string `json:"source_id"`
+	HostID           string `json:"host_id"`
+	HostName         string `json:"host_name"`
+	Node             string `json:"node"`
+	Package          string `json:"package"`
+	Title            string `json:"title,omitempty"`
+	CurrentVersion   string `json:"current_version,omitempty"`
+	CandidateVersion string `json:"candidate_version,omitempty"`
+	Origin           string `json:"origin,omitempty"`
+	Section          string `json:"section,omitempty"`
+	Priority         string `json:"priority,omitempty"`
+	Health           Health `json:"health"`
+}
+
+type Repository struct {
+	ID         string `json:"id"`
+	SourceID   string `json:"source_id"`
+	HostID     string `json:"host_id"`
+	HostName   string `json:"host_name"`
+	Node       string `json:"node"`
+	File       string `json:"file,omitempty"`
+	Types      string `json:"types,omitempty"`
+	URIs       string `json:"uris,omitempty"`
+	Suites     string `json:"suites,omitempty"`
+	Components string `json:"components,omitempty"`
+	Enabled    bool   `json:"enabled"`
+	Status     string `json:"status,omitempty"`
+	Warning    string `json:"warning,omitempty"`
+	Health     Health `json:"health"`
+}
+
+type Subscription struct {
+	ID          string `json:"id"`
+	SourceID    string `json:"source_id"`
+	HostID      string `json:"host_id"`
+	HostName    string `json:"host_name"`
+	Node        string `json:"node"`
+	Status      string `json:"status,omitempty"`
+	Level       string `json:"level,omitempty"`
+	ProductName string `json:"product_name,omitempty"`
+	ServerID    string `json:"server_id,omitempty"`
+	NextDueDate string `json:"next_due_date,omitempty"`
+	Health      Health `json:"health"`
 }
 
 type Alert struct {
@@ -190,17 +422,50 @@ func Finalize(s State) State {
 	if s.Hosts == nil {
 		s.Hosts = []Host{}
 	}
+	if s.Clusters == nil {
+		s.Clusters = []Cluster{}
+	}
 	if s.Storages == nil {
 		s.Storages = []Storage{}
 	}
 	if s.Disks == nil {
 		s.Disks = []Disk{}
 	}
+	if s.Networks == nil {
+		s.Networks = []Network{}
+	}
+	if s.Services == nil {
+		s.Services = []Service{}
+	}
+	if s.ZFSPools == nil {
+		s.ZFSPools = []ZFSPool{}
+	}
 	if s.Guests == nil {
 		s.Guests = []Guest{}
 	}
+	if s.Snapshots == nil {
+		s.Snapshots = []Snapshot{}
+	}
 	if s.Tasks == nil {
 		s.Tasks = []Task{}
+	}
+	if s.BackupJobs == nil {
+		s.BackupJobs = []BackupJob{}
+	}
+	if s.Replications == nil {
+		s.Replications = []Replication{}
+	}
+	if s.HAResources == nil {
+		s.HAResources = []HAResource{}
+	}
+	if s.Updates == nil {
+		s.Updates = []Update{}
+	}
+	if s.Repositories == nil {
+		s.Repositories = []Repository{}
+	}
+	if s.Subscriptions == nil {
+		s.Subscriptions = []Subscription{}
 	}
 	if s.Alerts == nil {
 		s.Alerts = []Alert{}
@@ -222,6 +487,7 @@ func Finalize(s State) State {
 			s.Summary.GuestsStopped++
 		}
 	}
+	s.Summary.Updates = len(s.Updates)
 	for _, a := range s.Alerts {
 		if a.Severity == HealthCritical {
 			s.Summary.Health = HealthCritical
