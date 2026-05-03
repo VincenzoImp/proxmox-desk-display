@@ -654,15 +654,13 @@ void drawOverview() {
   tft.drawString(state.summary.alerts > 0 ? "TOP ALERT" : "STATUS", 10, y);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   if (state.summary.alerts > 0 && state.alertCount > 0) {
-    tft.drawString(clipText(state.alerts[0].title, 36), 10, y + 16);
+    tft.drawString(clipText(state.alerts[0].title, 36), 10, y + 14);
     tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    tft.drawString(clipText(state.alerts[0].message, 42), 10, y + 30);
+    tft.drawString(String(state.summary.alerts) + " active alerts", 10, y + 28);
   } else {
-    tft.drawString("All configured checks are OK", 10, y + 16);
+    tft.drawString("All configured checks are OK", 10, y + 14);
   }
 
-  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  tft.drawString("B refresh  A hosts", 10, tft.height() - 30);
   drawFooter();
 }
 
@@ -670,7 +668,7 @@ void drawHosts() {
   drawHeader("HOSTS", "");
   tft.setTextSize(1);
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  tft.drawString("B selects", 10, 38);
+  tft.drawString("HOST", 40, 38);
   tft.drawString("C R D", 218, 38);
   int y = 52;
   if (state.hostCount == 0) {
@@ -759,9 +757,6 @@ void drawHostDetail() {
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString(String(h.running) + " run  " + String(h.stopped) + " stop", 72, y);
 
-  y += 18;
-  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.drawString("A next: system", 10, y);
   drawFooter();
 }
 
@@ -863,7 +858,7 @@ void drawGuests() {
   drawHeader("GUESTS", "");
   tft.setTextSize(1);
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  tft.drawString("B selects  A screen", 10, 38);
+  tft.drawString("VM/LXC", 43, 38);
   tft.drawString("C R D", 218, 38);
   int y = 52;
   if (state.guestCount == 0) {
