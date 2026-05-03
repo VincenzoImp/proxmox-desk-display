@@ -601,31 +601,68 @@ void drawOverview() {
     return;
   }
 
-  const size_t visibleRows = 4;
-  size_t start = visibleWindowStart(selectedHost, state.hostCount, visibleRows);
-  size_t end = start + visibleRows;
-  if (end > state.hostCount) end = state.hostCount;
+  int onlineHosts = 0;
+  int cpuSum = 0;
+  int cpuMax = 0;
+  int memorySum = 0;
+  int memoryMax = 0;
+  for (size_t i = 0; i < state.hostCount; ++i) {
+    Host &h = state.hosts[i];
+    if (!h.online) continue;
+    onlineHosts++;
+    cpuSum += h.cpu;
+    memorySum += h.memory;
+    cpuMax = max(cpuMax, h.cpu);
+    memoryMax = max(memoryMax, h.memory);
+  }
+
+  int diskSum = 0;
+  int diskMax = 0;
+  int diskCount = 0;
+  for (size_t i = 0; i < state.storageCount; ++i) {
+    Storage &s = state.storages[i];
+    if (s.diskTotal <= 0) continue;
+    diskCount++;
+    diskSum += s.disk;
+    diskMax = max(diskMax, s.disk);
+  }
+  if (diskCount == 0) {
+    for (size_t i = 0; i < state.hostCount; ++i) {
+      Host &h = state.hosts[i];
+      if (h.storageTotal <= 0) continue;
+      diskCount++;
+      diskSum += h.storage;
+      diskMax = max(diskMax, h.storage);
+    }
+  }
+
+  int cpuAvg = onlineHosts == 0 ? 0 : cpuSum / onlineHosts;
+  int memoryAvg = onlineHosts == 0 ? 0 : memorySum / onlineHosts;
+  int diskAvg = diskCount == 0 ? 0 : diskSum / diskCount;
+
+  int y = 58;
+  drawMetricRow("CPU", "avg " + String(cpuAvg) + "%  max " + String(cpuMax) + "%", cpuAvg, TFT_CYAN, y);
+  y += 20;
+  drawMetricRow("RAM", "avg " + String(memoryAvg) + "%  max " + String(memoryMax) + "%", memoryAvg,
+                memoryMax >= 90 ? TFT_RED : TFT_GREEN, y);
+  y += 20;
+  drawMetricRow("DSK", "avg " + String(diskAvg) + "%  max " + String(diskMax) + "%", diskAvg,
+                diskMax >= 90 ? TFT_RED : TFT_YELLOW, y);
+
+  y += 28;
+  tft.setTextColor(state.summary.alerts > 0 ? colorForHealth(state.summary.health) : TFT_GREEN, TFT_BLACK);
+  tft.drawString(state.summary.alerts > 0 ? "TOP ALERT" : "STATUS", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  if (state.summary.alerts > 0 && state.alertCount > 0) {
+    tft.drawString(clipText(state.alerts[0].title, 36), 10, y + 16);
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString(clipText(state.alerts[0].message, 42), 10, y + 30);
+  } else {
+    tft.drawString("All configured checks are OK", 10, y + 16);
+  }
 
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  tft.drawString("B host " + String(static_cast<int>(start + 1)) + "-" + String(static_cast<int>(end)) + "/" +
-                     String(static_cast<int>(state.hostCount)),
-                 10, 52);
-
-  int y = 66;
-  for (size_t i = start; i < end; ++i) {
-    Host &h = state.hosts[i];
-    uint16_t rowBg = i == selectedHost ? TFT_DARKGREY : TFT_BLACK;
-    if (i == selectedHost) tft.fillRect(6, y - 2, tft.width() - 12, 18, rowBg);
-    tft.fillRect(11, y + 3, 7, 7, colorForHealth(h.health));
-    tft.setTextColor(h.online ? TFT_WHITE : TFT_RED, rowBg);
-    tft.drawString(clipText(h.name, 16), 25, y);
-    tft.setTextColor(TFT_LIGHTGREY, rowBg);
-    tft.drawString("C" + String(h.cpu), 160, y);
-    tft.drawString("R" + String(h.memory), 204, y);
-    tft.drawString("S" + String(h.storage), 248, y);
-    tft.drawString(String(h.running) + "g", 286, y);
-    y += 20;
-  }
+  tft.drawString("B refresh  A hosts", 10, tft.height() - 30);
   drawFooter();
 }
 
@@ -1083,7 +1120,7 @@ void manualRefresh() {
 }
 
 void buttonBShort() {
-  if (screenIndex == 0 || screenIndex == 1 || screenIndex == 2 || screenIndex == 3) {
+  if (screenIndex == 1 || screenIndex == 2 || screenIndex == 3) {
     nextHost();
     return;
   }
