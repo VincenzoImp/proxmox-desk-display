@@ -1,0 +1,16 @@
+.DS_Store
+
+# Bridge
+apps/bridge/pve-desk-display
+apps/bridge/coverage.out
+config.yaml
+.env
+
+# Firmware
+firmware/t-display-s3/.pio/
+firmware/t-display-s3/.vscode/
+firmware/t-display-s3/include/secrets.h
+
+# Local artifacts
+dist/
+tmp/

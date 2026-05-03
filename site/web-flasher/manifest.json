@@ -1,0 +1,17 @@
+{
+  "name": "Proxmox Desk Display",
+  "version": "0.1.0",
+  "home_assistant_domain": "none",
+  "funding_url": "",
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        {
+          "path": "firmware-t-display-s3.bin",
+          "offset": 0
+        }
+      ]
+    }
+  ]
+}
