@@ -226,11 +226,6 @@ String formatBytes(int64_t bytes) {
   return String(bytes / 1024) + "K";
 }
 
-int pctOf(int64_t used, int64_t total) {
-  if (used <= 0 || total <= 0) return 0;
-  return constrain(static_cast<int>(round(static_cast<double>(used) / static_cast<double>(total) * 100.0)), 0, 100);
-}
-
 String formatUptime(int64_t seconds) {
   if (seconds <= 0) return "-";
   int64_t days = seconds / 86400;
@@ -631,72 +626,32 @@ void drawOverview() {
     return;
   }
 
-  int onlineHosts = 0;
-  int cpuSum = 0;
-  int cpuMax = 0;
-  int64_t memoryUsed = 0;
-  int64_t memoryTotal = 0;
-  int memoryMax = 0;
-  for (size_t i = 0; i < state.hostCount; ++i) {
-    Host &h = state.hosts[i];
-    if (!h.online) continue;
-    onlineHosts++;
-    cpuSum += h.cpu;
-    memoryUsed += h.memoryUsed;
-    memoryTotal += h.memoryTotal;
-    cpuMax = max(cpuMax, h.cpu);
-    memoryMax = max(memoryMax, h.memory);
-  }
-
-  int64_t diskUsed = 0;
-  int64_t diskTotal = 0;
-  int diskMax = 0;
-  int diskCount = 0;
+  Host &focus = state.hosts[selectedHost];
+  int focusStorageMax = focus.storage;
   for (size_t i = 0; i < state.storageCount; ++i) {
     Storage &s = state.storages[i];
-    if (s.diskTotal <= 0) continue;
-    diskCount++;
-    diskUsed += s.diskUsed;
-    diskTotal += s.diskTotal;
-    diskMax = max(diskMax, s.disk);
-  }
-  if (diskCount == 0) {
-    for (size_t i = 0; i < state.hostCount; ++i) {
-      Host &h = state.hosts[i];
-      if (h.storageTotal <= 0) continue;
-      diskCount++;
-      diskUsed += h.storageUsed;
-      diskTotal += h.storageTotal;
-      diskMax = max(diskMax, h.storage);
-    }
+    if (s.hostName == focus.name) focusStorageMax = max(focusStorageMax, s.disk);
   }
 
-  int cpuAvg = onlineHosts == 0 ? 0 : cpuSum / onlineHosts;
-  int memoryAvg = pctOf(memoryUsed, memoryTotal);
-  int diskAvg = pctOf(diskUsed, diskTotal);
-
-  int y = 54;
-  drawMetricRow("CPU", "avg " + String(cpuAvg) + "%  max " + String(cpuMax) + "%", cpuAvg, TFT_CYAN, y);
-  y += 18;
-  drawMetricRow("RAM", "avg " + String(memoryAvg) + "%  max " + String(memoryMax) + "%", memoryAvg,
-                memoryMax >= 90 ? TFT_RED : TFT_GREEN, y);
-  y += 18;
-  drawMetricRow("DSK", "avg " + String(diskAvg) + "%  max " + String(diskMax) + "%", diskAvg,
-                diskMax >= 90 ? TFT_RED : TFT_YELLOW, y);
-
-  Host &focus = state.hosts[selectedHost];
-  y += 22;
+  int y = 52;
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
   tft.drawString("FOCUS " + String(selectedHost + 1) + "/" + String(state.hostCount), 10, y);
   tft.setTextColor(focus.online ? TFT_WHITE : TFT_RED, TFT_BLACK);
   tft.drawString(clipText(focus.name, 24), 86, y);
 
-  y += 14;
+  y += 16;
+  drawMetricRow("CPU", String(focus.cpu) + "% / " + String(focus.maxCPU) + " cores", focus.cpu, TFT_CYAN, y);
+  y += 18;
+  drawMetricRow("RAM", formatBytes(focus.memoryUsed) + " / " + formatBytes(focus.memoryTotal), focus.memory,
+                focus.memory >= 90 ? TFT_RED : TFT_GREEN, y);
+  y += 18;
+  drawMetricRow("DSK", "max " + String(focusStorageMax) + "%", focusStorageMax,
+                focusStorageMax >= 90 ? TFT_RED : TFT_YELLOW, y);
+
+  y += 18;
   tft.fillRect(11, y + 3, 7, 7, colorForHealth(focus.health));
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.drawString("C" + String(focus.cpu), 28, y);
-  tft.drawString("R" + String(focus.memory), 72, y);
-  tft.drawString("D" + String(focus.storage), 116, y);
+  tft.drawString("load " + (focus.loadAvg.length() ? focus.loadAvg : "-"), 28, y);
   tft.drawString(String(focus.running) + " run", 160, y);
 
   y += 16;
