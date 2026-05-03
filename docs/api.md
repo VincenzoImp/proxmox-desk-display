@@ -51,7 +51,9 @@ Response:
   },
   "hosts": [],
   "storages": [],
+  "disks": [],
   "guests": [],
+  "tasks": [],
   "alerts": []
 }
 ```
@@ -76,10 +78,23 @@ Host objects include node-level detail for the Host Detail screen:
   "storage_pct": 20,
   "storage_used_bytes": 5787279360,
   "storage_total_bytes": 28971167744,
+  "storage_max_pct": 99,
+  "storage_max_name": "datapool",
   "uptime_sec": 5890516,
   "load_avg": ["0.40", "0.48", "0.49"],
   "pve_version": "pve-manager/9.1.2/...",
-  "kernel_version": "Linux 6.17.2-2-pve ..."
+  "kernel_version": "Linux 6.17.2-2-pve ...",
+  "primary_address": "192.168.1.55",
+  "network_active": 2,
+  "network_total": 2,
+  "services_running": 20,
+  "services_failed": 0,
+  "services_total": 23,
+  "disk_count": 8,
+  "disk_issues": 0,
+  "failed_tasks_24h": 0,
+  "last_backup_status": "OK",
+  "last_backup_age_sec": 7200
 }
 ```
 
@@ -98,6 +113,24 @@ Storage objects power the Storage screen:
   "disk_used_bytes": 7759663476736,
   "disk_total_bytes": 7834020347904,
   "health": "critical"
+}
+```
+
+Disk objects are collected from Proxmox node disk inventory:
+
+```json
+{
+  "id": "pve-55/pve/nvme0n1",
+  "name": "nvme0n1",
+  "host_name": "jonsboN4 / pve",
+  "model": "CT1000P310SSD8",
+  "serial": "2534524DCF93",
+  "type": "nvme",
+  "used_by": "BIOS boot",
+  "size_bytes": 1000204886016,
+  "smart_health": "PASSED",
+  "wearout_pct": 100,
+  "health": "ok"
 }
 ```
 
@@ -124,7 +157,32 @@ Guest objects include both utilization and allocated resources:
   "net_in_bytes": 4243614872,
   "net_out_bytes": 6101255841,
   "disk_read_bytes": 50119139328,
-  "disk_write_bytes": 215348330496
+  "disk_write_bytes": 215348330496,
+  "os_type": "l26",
+  "ip_address": "192.168.1.50/24",
+  "agent_enabled": true,
+  "onboot": true,
+  "protection": false,
+  "template": false,
+  "unprivileged": false
+}
+```
+
+Task objects represent recent Proxmox node tasks, newest first. The bridge keeps the payload bounded for small displays.
+
+```json
+{
+  "id": "UPID:pve:...",
+  "host_name": "zimablade / pve",
+  "type": "vncshell",
+  "user": "root@pam",
+  "status": "OK",
+  "target": "100 crafty-controller",
+  "started_at": 1777818485,
+  "started_age_sec": 14147,
+  "ended_at": 1777819880,
+  "duration_sec": 1395,
+  "health": "ok"
 }
 ```
 

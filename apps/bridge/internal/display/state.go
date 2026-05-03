@@ -20,7 +20,9 @@ type State struct {
 	Summary     Summary   `json:"summary"`
 	Hosts       []Host    `json:"hosts"`
 	Storages    []Storage `json:"storages"`
+	Disks       []Disk    `json:"disks"`
 	Guests      []Guest   `json:"guests"`
+	Tasks       []Task    `json:"tasks"`
 	Alerts      []Alert   `json:"alerts"`
 }
 
@@ -50,10 +52,24 @@ type Host struct {
 	StoragePct        int      `json:"storage_pct"`
 	StorageUsedBytes  int64    `json:"storage_used_bytes"`
 	StorageTotalBytes int64    `json:"storage_total_bytes"`
+	StorageMaxPct     int      `json:"storage_max_pct"`
+	StorageMaxName    string   `json:"storage_max_name,omitempty"`
 	UptimeSec         int64    `json:"uptime_sec"`
 	LoadAvg           []string `json:"load_avg,omitempty"`
 	PVEVersion        string   `json:"pve_version,omitempty"`
 	KernelVersion     string   `json:"kernel_version,omitempty"`
+	PrimaryAddress    string   `json:"primary_address,omitempty"`
+	NetworkActive     int      `json:"network_active"`
+	NetworkTotal      int      `json:"network_total"`
+	ServicesRunning   int      `json:"services_running"`
+	ServicesFailed    int      `json:"services_failed"`
+	ServicesTotal     int      `json:"services_total"`
+	DiskCount         int      `json:"disk_count"`
+	DiskIssues        int      `json:"disk_issues"`
+	FailedTasks24h    int      `json:"failed_tasks_24h"`
+	LastBackupStatus  string   `json:"last_backup_status,omitempty"`
+	LastBackupAgeSec  int64    `json:"last_backup_age_sec,omitempty"`
+	DataWarnings      []string `json:"data_warnings,omitempty"`
 	GuestsRunning     int      `json:"guests_running"`
 	GuestsStopped     int      `json:"guests_stopped"`
 	Health            Health   `json:"health"`
@@ -75,6 +91,23 @@ type Storage struct {
 	DiskUsedBytes  int64  `json:"disk_used_bytes"`
 	DiskTotalBytes int64  `json:"disk_total_bytes"`
 	Health         Health `json:"health"`
+}
+
+type Disk struct {
+	ID          string `json:"id"`
+	SourceID    string `json:"source_id"`
+	HostID      string `json:"host_id"`
+	HostName    string `json:"host_name"`
+	Node        string `json:"node"`
+	Name        string `json:"name"`
+	Model       string `json:"model,omitempty"`
+	Serial      string `json:"serial,omitempty"`
+	Type        string `json:"type,omitempty"`
+	UsedBy      string `json:"used_by,omitempty"`
+	SizeBytes   int64  `json:"size_bytes"`
+	SMARTHealth string `json:"smart_health,omitempty"`
+	WearoutPct  int    `json:"wearout_pct,omitempty"`
+	Health      Health `json:"health"`
 }
 
 type Guest struct {
@@ -100,9 +133,36 @@ type Guest struct {
 	DiskReadBytes    int64  `json:"disk_read_bytes"`
 	DiskWriteBytes   int64  `json:"disk_write_bytes"`
 	Tags             string `json:"tags,omitempty"`
+	OSType           string `json:"os_type,omitempty"`
+	IPAddress        string `json:"ip_address,omitempty"`
+	AgentEnabled     bool   `json:"agent_enabled"`
+	OnBoot           bool   `json:"onboot"`
+	Protection       bool   `json:"protection"`
+	Template         bool   `json:"template"`
+	Unprivileged     bool   `json:"unprivileged"`
+	ConfigWarning    string `json:"config_warning,omitempty"`
 	Pinned           bool   `json:"pinned"`
 	Expected         string `json:"expected,omitempty"`
 	Health           Health `json:"health"`
+}
+
+type Task struct {
+	ID            string `json:"id"`
+	SourceID      string `json:"source_id"`
+	HostID        string `json:"host_id"`
+	HostName      string `json:"host_name"`
+	Node          string `json:"node"`
+	Type          string `json:"type"`
+	User          string `json:"user,omitempty"`
+	Status        string `json:"status"`
+	Target        string `json:"target,omitempty"`
+	VMID          string `json:"vmid,omitempty"`
+	GuestName     string `json:"guest_name,omitempty"`
+	StartedAt     int64  `json:"started_at"`
+	StartedAgeSec int64  `json:"started_age_sec,omitempty"`
+	EndedAt       int64  `json:"ended_at,omitempty"`
+	DurationSec   int64  `json:"duration_sec,omitempty"`
+	Health        Health `json:"health"`
 }
 
 type Alert struct {
@@ -133,8 +193,14 @@ func Finalize(s State) State {
 	if s.Storages == nil {
 		s.Storages = []Storage{}
 	}
+	if s.Disks == nil {
+		s.Disks = []Disk{}
+	}
 	if s.Guests == nil {
 		s.Guests = []Guest{}
+	}
+	if s.Tasks == nil {
+		s.Tasks = []Task{}
 	}
 	if s.Alerts == nil {
 		s.Alerts = []Alert{}

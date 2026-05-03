@@ -1,6 +1,10 @@
 package proxmox
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/display"
+)
 
 func TestSummarizeGPUs(t *testing.T) {
 	count, summary := summarizeGPUs([]pciDevice{
@@ -20,5 +24,38 @@ func TestGPUNameAvoidsDuplicateVendor(t *testing.T) {
 	got := gpuName(pciDevice{VendorName: "Intel", DeviceName: "Intel Corporation Alder Lake-N Graphics"})
 	if got != "Intel Corporation Alder Lake-N Graphics" {
 		t.Fatalf("gpuName = %q", got)
+	}
+}
+
+func TestSummarizeNetworkSkipsLoopback(t *testing.T) {
+	total, active, primary := summarizeNetwork([]networkInterface{
+		{Iface: "lo", Active: 1, Address: "127.0.0.1"},
+		{Iface: "vmbr0", Active: 1, Address: "192.168.1.55"},
+		{Iface: "eno1", Active: 0},
+	})
+	if total != 2 || active != 1 || primary != "192.168.1.55" {
+		t.Fatalf("network summary = (%d, %d, %q)", total, active, primary)
+	}
+}
+
+func TestApplyGuestConfig(t *testing.T) {
+	guest := display.Guest{}
+	applyGuestConfig(&guest, map[string]any{
+		"cores":      float64(4),
+		"memory":     "8192",
+		"ostype":     "l26",
+		"agent":      "enabled=1",
+		"onboot":     "1",
+		"protection": float64(1),
+		"ipconfig0":  "ip=192.168.1.50/24,gw=192.168.1.1",
+	})
+	if guest.MaxCPU != 4 || guest.MemoryTotalBytes != 8192*1024*1024 {
+		t.Fatalf("guest resources not applied: %#v", guest)
+	}
+	if !guest.AgentEnabled || !guest.OnBoot || !guest.Protection {
+		t.Fatalf("guest flags not applied: %#v", guest)
+	}
+	if guest.OSType != "l26" || guest.IPAddress != "192.168.1.50/24" {
+		t.Fatalf("guest identity config not applied: %#v", guest)
 	}
 }

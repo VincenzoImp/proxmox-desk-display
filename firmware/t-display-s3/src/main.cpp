@@ -19,12 +19,14 @@ constexpr uint8_t BTN_B = 14;  // LILYGO user button
 constexpr uint8_t BACKLIGHT_PIN = 38;
 constexpr unsigned long POLL_MS = 10000;
 constexpr unsigned long BUTTON_LONG_MS = 1200;
-constexpr uint8_t SCREEN_COUNT = 9;
+constexpr uint8_t SCREEN_COUNT = 13;
 constexpr size_t MAX_HOSTS = 12;
 constexpr size_t MAX_STORAGES = 24;
+constexpr size_t MAX_DISKS = 24;
 constexpr size_t MAX_GUESTS = 24;
+constexpr size_t MAX_TASKS = 24;
 constexpr size_t MAX_ALERTS = 12;
-constexpr size_t JSON_DOC_CAPACITY = 49152;
+constexpr size_t JSON_DOC_CAPACITY = 81920;
 constexpr int LIST_ROW_H = 14;
 
 TFT_eSPI tft;
@@ -65,10 +67,24 @@ struct Host {
   int storage = 0;
   int64_t storageUsed = 0;
   int64_t storageTotal = 0;
+  int storageMax = 0;
+  String storageMaxName;
   int64_t uptime = 0;
   String loadAvg;
   String pveVersion;
   String kernelVersion;
+  String primaryAddress;
+  int networkActive = 0;
+  int networkTotal = 0;
+  int servicesRunning = 0;
+  int servicesFailed = 0;
+  int servicesTotal = 0;
+  int diskCount = 0;
+  int diskIssues = 0;
+  int failedTasks24h = 0;
+  String lastBackupStatus;
+  int64_t lastBackupAge = 0;
+  String dataWarnings;
   int running = 0;
   int stopped = 0;
   String health = "unknown";
@@ -85,6 +101,19 @@ struct Storage {
   int disk = 0;
   int64_t diskUsed = 0;
   int64_t diskTotal = 0;
+  String health = "unknown";
+};
+
+struct Disk {
+  String name;
+  String hostName;
+  String model;
+  String serial;
+  String type;
+  String usedBy;
+  int64_t size = 0;
+  String smartHealth;
+  int wearout = 0;
   String health = "unknown";
 };
 
@@ -108,8 +137,31 @@ struct Guest {
   int64_t diskRead = 0;
   int64_t diskWrite = 0;
   String tags;
+  String osType;
+  String ipAddress;
+  bool agentEnabled = false;
+  bool onBoot = false;
+  bool protection = false;
+  bool isTemplate = false;
+  bool unprivileged = false;
+  String configWarning;
   String expected;
   bool pinned = false;
+  String health = "unknown";
+};
+
+struct Task {
+  String type;
+  String user;
+  String status;
+  String target;
+  String vmid;
+  String guestName;
+  String hostName;
+  int64_t startedAt = 0;
+  int64_t startedAge = 0;
+  int64_t endedAt = 0;
+  int64_t duration = 0;
   String health = "unknown";
 };
 
@@ -128,8 +180,12 @@ struct DisplayState {
   size_t hostCount = 0;
   Storage storages[MAX_STORAGES];
   size_t storageCount = 0;
+  Disk disks[MAX_DISKS];
+  size_t diskCount = 0;
   Guest guests[MAX_GUESTS];
   size_t guestCount = 0;
+  Task tasks[MAX_TASKS];
+  size_t taskCount = 0;
   Alert alerts[MAX_ALERTS];
   size_t alertCount = 0;
 };
@@ -143,7 +199,9 @@ unsigned long lastOK = 0;
 uint8_t screenIndex = 0;
 size_t selectedHost = 0;
 size_t selectedStorage = 0;
+size_t selectedDisk = 0;
 size_t selectedGuest = 0;
+size_t selectedTask = 0;
 size_t selectedAlert = 0;
 
 struct ButtonState {
@@ -234,6 +292,22 @@ String formatUptime(int64_t seconds) {
   if (days > 0) return String(days) + "d " + String(hours) + "h";
   if (hours > 0) return String(hours) + "h " + String(minutes) + "m";
   return String(minutes) + "m";
+}
+
+String formatAge(int64_t seconds) {
+  if (seconds <= 0) return "-";
+  return formatUptime(seconds) + " ago";
+}
+
+String yesNo(bool value) {
+  return value ? "yes" : "no";
+}
+
+String firstTag(const String &tags) {
+  if (tags.length() == 0) return "";
+  int split = tags.indexOf(";");
+  if (split < 0) return tags;
+  return tags.substring(0, split);
 }
 
 void setBacklight(uint8_t brightness) {
@@ -448,6 +522,8 @@ bool parseState(const String &payload) {
     host.storage = h["storage_pct"] | 0;
     host.storageUsed = h["storage_used_bytes"] | 0;
     host.storageTotal = h["storage_total_bytes"] | 0;
+    host.storageMax = h["storage_max_pct"] | host.storage;
+    host.storageMaxName = h["storage_max_name"] | "";
     host.uptime = h["uptime_sec"] | 0;
     JsonArray load = h["load_avg"].as<JsonArray>();
     if (!load.isNull() && load.size() > 0) {
@@ -457,6 +533,25 @@ bool parseState(const String &payload) {
     }
     host.pveVersion = h["pve_version"] | "";
     host.kernelVersion = h["kernel_version"] | "";
+    host.primaryAddress = h["primary_address"] | "";
+    host.networkActive = h["network_active"] | 0;
+    host.networkTotal = h["network_total"] | 0;
+    host.servicesRunning = h["services_running"] | 0;
+    host.servicesFailed = h["services_failed"] | 0;
+    host.servicesTotal = h["services_total"] | 0;
+    host.diskCount = h["disk_count"] | 0;
+    host.diskIssues = h["disk_issues"] | 0;
+    host.failedTasks24h = h["failed_tasks_24h"] | 0;
+    host.lastBackupStatus = h["last_backup_status"] | "";
+    host.lastBackupAge = h["last_backup_age_sec"] | 0;
+    JsonArray warnings = h["data_warnings"].as<JsonArray>();
+    if (!warnings.isNull()) {
+      for (JsonVariant warning : warnings) {
+        if (host.dataWarnings.length() > 0) host.dataWarnings += ", ";
+        host.dataWarnings += warning.as<String>();
+        if (host.dataWarnings.length() > 48) break;
+      }
+    }
     host.running = h["guests_running"] | 0;
     host.stopped = h["guests_stopped"] | 0;
     host.health = h["health"] | "unknown";
@@ -490,6 +585,27 @@ bool parseState(const String &payload) {
     selectedStorage = state.storageCount - 1;
   }
 
+  for (JsonObject d : doc["disks"].as<JsonArray>()) {
+    if (state.diskCount >= MAX_DISKS) break;
+    Disk &disk = state.disks[state.diskCount++];
+    disk.name = d["name"] | "";
+    disk.hostName = d["host_name"] | "";
+    disk.model = d["model"] | "";
+    disk.serial = d["serial"] | "";
+    disk.type = d["type"] | "";
+    disk.usedBy = d["used_by"] | "";
+    disk.size = d["size_bytes"] | 0;
+    disk.smartHealth = d["smart_health"] | "";
+    disk.wearout = d["wearout_pct"] | 0;
+    disk.health = d["health"] | "unknown";
+  }
+
+  if (state.diskCount == 0) {
+    selectedDisk = 0;
+  } else if (selectedDisk >= state.diskCount) {
+    selectedDisk = state.diskCount - 1;
+  }
+
   for (JsonObject g : doc["guests"].as<JsonArray>()) {
     if (state.guestCount >= MAX_GUESTS) break;
     Guest &guest = state.guests[state.guestCount++];
@@ -512,6 +628,14 @@ bool parseState(const String &payload) {
     guest.diskRead = g["disk_read_bytes"] | 0;
     guest.diskWrite = g["disk_write_bytes"] | 0;
     guest.tags = g["tags"] | "";
+    guest.osType = g["os_type"] | "";
+    guest.ipAddress = g["ip_address"] | "";
+    guest.agentEnabled = g["agent_enabled"] | false;
+    guest.onBoot = g["onboot"] | false;
+    guest.protection = g["protection"] | false;
+    guest.isTemplate = g["template"] | false;
+    guest.unprivileged = g["unprivileged"] | false;
+    guest.configWarning = g["config_warning"] | "";
     guest.pinned = g["pinned"] | false;
     guest.expected = g["expected"] | "";
     guest.health = g["health"] | "unknown";
@@ -521,6 +645,29 @@ bool parseState(const String &payload) {
     selectedGuest = 0;
   } else if (selectedGuest >= state.guestCount) {
     selectedGuest = state.guestCount - 1;
+  }
+
+  for (JsonObject t : doc["tasks"].as<JsonArray>()) {
+    if (state.taskCount >= MAX_TASKS) break;
+    Task &task = state.tasks[state.taskCount++];
+    task.type = t["type"] | "";
+    task.user = t["user"] | "";
+    task.status = t["status"] | "";
+    task.target = t["target"] | "";
+    task.vmid = t["vmid"] | "";
+    task.guestName = t["guest_name"] | "";
+    task.hostName = t["host_name"] | "";
+    task.startedAt = t["started_at"] | 0;
+    task.startedAge = t["started_age_sec"] | 0;
+    task.endedAt = t["ended_at"] | 0;
+    task.duration = t["duration_sec"] | 0;
+    task.health = t["health"] | "unknown";
+  }
+
+  if (state.taskCount == 0) {
+    selectedTask = 0;
+  } else if (selectedTask >= state.taskCount) {
+    selectedTask = state.taskCount - 1;
   }
 
   for (JsonObject a : doc["alerts"].as<JsonArray>()) {
@@ -539,8 +686,8 @@ bool parseState(const String &payload) {
 
   lastError = "";
   lastOK = millis();
-  Serial.printf("json: hosts=%d storages=%d guests=%d alerts=%d\n", state.hostCount, state.storageCount, state.guestCount,
-                state.alertCount);
+  Serial.printf("json: hosts=%d storages=%d disks=%d guests=%d tasks=%d alerts=%d\n", state.hostCount,
+                state.storageCount, state.diskCount, state.guestCount, state.taskCount, state.alertCount);
   return true;
 }
 
@@ -587,6 +734,28 @@ void drawMetricRow(const String &label, const String &value, int pct, uint16_t c
   drawBar(205, y, 85, 8, pct, color);
 }
 
+int storagePressureForHost(const Host &host) {
+  int pressure = max(host.storage, host.storageMax);
+  for (size_t i = 0; i < state.storageCount; ++i) {
+    const Storage &s = state.storages[i];
+    if (s.hostName == host.name) pressure = max(pressure, s.disk);
+  }
+  return pressure;
+}
+
+String storagePressureNameForHost(const Host &host) {
+  String name = host.storageMaxName;
+  int pressure = max(host.storage, host.storageMax);
+  for (size_t i = 0; i < state.storageCount; ++i) {
+    const Storage &s = state.storages[i];
+    if (s.hostName == host.name && s.disk >= pressure) {
+      pressure = s.disk;
+      name = s.name;
+    }
+  }
+  return name.length() ? name : "root";
+}
+
 int drawWrappedField(const String &label, String value, int y, size_t maxLines) {
   if (value.length() == 0) value = "-";
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
@@ -627,11 +796,7 @@ void drawOverview() {
   }
 
   Host &focus = state.hosts[selectedHost];
-  int focusStorageMax = focus.storage;
-  for (size_t i = 0; i < state.storageCount; ++i) {
-    Storage &s = state.storages[i];
-    if (s.hostName == focus.name) focusStorageMax = max(focusStorageMax, s.disk);
-  }
+  int focusStorageMax = storagePressureForHost(focus);
 
   int y = 52;
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
@@ -704,7 +869,7 @@ void drawHosts() {
     tft.setTextColor(TFT_LIGHTGREY, rowBg);
     tft.drawString(String(h.cpu), 210, y);
     tft.drawString(String(h.memory), 246, y);
-    tft.drawString(String(h.storage), 286, y);
+    tft.drawString(String(storagePressureForHost(h)), 286, y);
     y += 14;
   }
   drawFooter();
@@ -748,7 +913,9 @@ void drawHostDetail() {
                 colorForHealth(h.health), y);
 
   y += 18;
-  drawMetricRow("ROOT", formatBytes(h.storageUsed) + " / " + formatBytes(h.storageTotal), h.storage, TFT_YELLOW, y);
+  int pressure = storagePressureForHost(h);
+  String pressureName = clipText(storagePressureNameForHost(h), 10);
+  drawMetricRow("STOR", pressureName + " " + String(pressure) + "%", pressure, pressure >= 90 ? TFT_RED : TFT_YELLOW, y);
 
   y += 18;
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
@@ -800,6 +967,107 @@ void drawHostSystem() {
   y = drawWrappedField("GPU", gpu, y, 2);
   y = drawWrappedField("PVE", h.pveVersion, y, 1);
   drawWrappedField("KERN", h.kernelVersion, y, 1);
+
+  drawFooter();
+}
+
+void drawHostOps() {
+  tft.setTextSize(1);
+  if (state.hostCount == 0) {
+    drawHeader("OPS", "");
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString("No host selected", 10, 42);
+    drawFooter();
+    return;
+  }
+
+  Host &h = state.hosts[selectedHost];
+  drawHeader("OPS", h.health);
+  tft.setTextSize(1);
+  tft.setTextColor(colorForHealth(h.health), TFT_BLACK);
+  tft.drawString(h.online ? "ONLINE" : "OFFLINE", 10, 38);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(clipText(h.name, 22), 86, 38);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(selectedHost + 1) + "/" + String(state.hostCount), tft.width() - 8, 38);
+  tft.setTextDatum(TL_DATUM);
+
+  int y = 56;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("NET", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  String net = String(h.networkActive) + "/" + String(h.networkTotal);
+  if (h.primaryAddress.length() > 0) net += "  " + h.primaryAddress;
+  tft.drawString(clipText(net, 35), 72, y);
+
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("SVC", 10, y);
+  tft.setTextColor(h.servicesFailed > 0 ? TFT_RED : TFT_WHITE, TFT_BLACK);
+  String svc = String(h.servicesRunning) + "/" + String(h.servicesTotal) + " running";
+  if (h.servicesFailed > 0) svc += "  " + String(h.servicesFailed) + " failed";
+  tft.drawString(clipText(svc, 35), 72, y);
+
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("DISKS", 10, y);
+  tft.setTextColor(h.diskIssues > 0 ? TFT_RED : TFT_WHITE, TFT_BLACK);
+  String disks = String(h.diskCount);
+  if (h.diskIssues > 0) disks += "  " + String(h.diskIssues) + " issue";
+  tft.drawString(disks, 72, y);
+
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("TASKS", 10, y);
+  tft.setTextColor(h.failedTasks24h > 0 ? TFT_YELLOW : TFT_WHITE, TFT_BLACK);
+  tft.drawString(String(h.failedTasks24h) + " failed 24h", 72, y);
+
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("BACKUP", 10, y);
+  tft.setTextColor(h.lastBackupStatus == "OK" ? TFT_GREEN : TFT_WHITE, TFT_BLACK);
+  String backup = h.lastBackupStatus.length() ? h.lastBackupStatus + "  " + formatAge(h.lastBackupAge) : "-";
+  tft.drawString(clipText(backup, 35), 72, y);
+
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("DATA", 10, y);
+  tft.setTextColor(h.dataWarnings.length() > 0 ? TFT_YELLOW : TFT_GREEN, TFT_BLACK);
+  tft.drawString(h.dataWarnings.length() > 0 ? clipText(h.dataWarnings, 35) : "all collectors OK", 72, y);
+
+  drawFooter();
+}
+
+void drawDisks() {
+  tft.setTextSize(1);
+  if (state.diskCount == 0) {
+    drawHeader("DISKS", "");
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString("No physical disk data", 10, 42);
+    drawFooter();
+    return;
+  }
+
+  Disk &d = state.disks[selectedDisk];
+  drawHeader("DISKS", d.health);
+  tft.setTextSize(1);
+  tft.setTextColor(colorForHealth(d.health), TFT_BLACK);
+  tft.drawString(d.smartHealth.length() ? clipText(d.smartHealth, 10) : "UNKNOWN", 10, 38);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(clipText(d.name, 22), 86, 38);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(selectedDisk + 1) + "/" + String(state.diskCount), tft.width() - 8, 38);
+  tft.setTextDatum(TL_DATUM);
+
+  int y = 56;
+  y = drawWrappedField("MODEL", d.model, y, 2);
+  y = drawWrappedField("HOST", d.hostName, y, 1);
+  y = drawWrappedField("SIZE", formatBytes(d.size) + "  " + d.type, y, 1);
+  y = drawWrappedField("USED", d.usedBy, y, 1);
+  String wear = d.wearout > 0 ? String(d.wearout) + "%" : "-";
+  drawWrappedField("WEAR", wear + "  SN " + d.serial, y, 1);
 
   drawFooter();
 }
@@ -936,7 +1204,7 @@ void drawGuestDetail() {
   if (g.vmid.length() > 0) where += " " + g.vmid;
   where += "  " + g.hostName + "  up " + formatUptime(g.uptime);
   if (g.tags.length() > 0) {
-    where += "  #" + g.tags.substring(0, g.tags.indexOf(";") >= 0 ? g.tags.indexOf(";") : g.tags.length());
+    where += "  #" + firstTag(g.tags);
   }
   if (where.length() > 42) where = where.substring(0, 42);
   tft.drawString(where, 10, 54);
@@ -973,6 +1241,80 @@ void drawGuestDetail() {
   tft.drawString("IO", 10, y);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString(formatBytes(g.diskRead) + " r  " + formatBytes(g.diskWrite) + " w", 92, y);
+
+  drawFooter();
+}
+
+void drawGuestConfig() {
+  tft.setTextSize(1);
+  if (state.guestCount == 0) {
+    drawHeader("GCFG", "");
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString("No guest selected", 10, 42);
+    drawFooter();
+    return;
+  }
+
+  Guest &g = state.guests[selectedGuest];
+  drawHeader("GCFG", g.health);
+  tft.setTextSize(1);
+  tft.setTextColor(colorForHealth(g.health), TFT_BLACK);
+  tft.drawString(g.status == "running" ? "RUNNING" : g.status, 10, 38);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(clipText(g.name, 22), 86, 38);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(selectedGuest + 1) + "/" + String(state.guestCount), tft.width() - 8, 38);
+  tft.setTextDatum(TL_DATUM);
+
+  int y = 56;
+  y = drawWrappedField("VMID", g.type + " " + g.vmid + "  " + g.hostName, y, 1);
+  y = drawWrappedField("OS", g.osType, y, 1);
+  y = drawWrappedField("IP", g.ipAddress, y, 1);
+  String flags = String("boot ") + yesNo(g.onBoot) + "  prot " + yesNo(g.protection);
+  if (g.isTemplate) flags += "  template";
+  if (g.unprivileged) flags += "  unpriv";
+  y = drawWrappedField("FLAGS", flags, y, 1);
+  y = drawWrappedField("AGENT", yesNo(g.agentEnabled), y, 1);
+  String expect = g.pinned ? (String("pin ") + g.expected) : "-";
+  y = drawWrappedField("EXPECT", expect, y, 1);
+  String tags = firstTag(g.tags);
+  if (g.configWarning.length() > 0) tags = g.configWarning;
+  drawWrappedField(g.configWarning.length() > 0 ? "DATA" : "TAG", tags, y, 1);
+
+  drawFooter();
+}
+
+void drawTasks() {
+  tft.setTextSize(1);
+  if (state.taskCount == 0) {
+    drawHeader("TASKS", "");
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString("No recent task data", 10, 42);
+    drawFooter();
+    return;
+  }
+
+  Task &task = state.tasks[selectedTask];
+  drawHeader("TASKS", task.health);
+  tft.setTextSize(1);
+  tft.setTextColor(colorForHealth(task.health), TFT_BLACK);
+  tft.drawString(clipText(task.status, 10), 10, 38);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(clipText(task.type, 22), 86, 38);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(selectedTask + 1) + "/" + String(state.taskCount), tft.width() - 8, 38);
+  tft.setTextDatum(TL_DATUM);
+
+  int y = 56;
+  y = drawWrappedField("TARGET", task.target, y, 2);
+  y = drawWrappedField("HOST", task.hostName, y, 1);
+  y = drawWrappedField("USER", task.user, y, 1);
+  String timing = String("start ") + formatAge(task.startedAge);
+  if (task.duration > 0) timing += "  dur " + formatUptime(task.duration);
+  y = drawWrappedField("TIME", timing, y, 1);
+  drawWrappedField("STATUS", task.status, y, 2);
 
   drawFooter();
 }
@@ -1071,15 +1413,27 @@ void render() {
       drawHostSystem();
       break;
     case 4:
-      drawStorage();
+      drawHostOps();
       break;
     case 5:
-      drawGuests();
+      drawDisks();
       break;
     case 6:
-      drawGuestDetail();
+      drawStorage();
       break;
     case 7:
+      drawGuests();
+      break;
+    case 8:
+      drawGuestDetail();
+      break;
+    case 9:
+      drawGuestConfig();
+      break;
+    case 10:
+      drawTasks();
+      break;
+    case 11:
       drawAlerts();
       break;
     default:
@@ -1141,6 +1495,18 @@ void nextStorage() {
   render();
 }
 
+void nextDisk() {
+  if (state.diskCount == 0) return;
+  selectedDisk = (selectedDisk + 1) % state.diskCount;
+  render();
+}
+
+void nextTask() {
+  if (state.taskCount == 0) return;
+  selectedTask = (selectedTask + 1) % state.taskCount;
+  render();
+}
+
 void nextAlert() {
   if (state.alertCount == 0) return;
   selectedAlert = (selectedAlert + 1) % state.alertCount;
@@ -1153,19 +1519,27 @@ void manualRefresh() {
 }
 
 void buttonBShort() {
-  if (screenIndex == 0 || screenIndex == 1 || screenIndex == 2 || screenIndex == 3) {
+  if (screenIndex == 0 || screenIndex == 1 || screenIndex == 2 || screenIndex == 3 || screenIndex == 4) {
     nextHost();
     return;
   }
-  if (screenIndex == 4) {
+  if (screenIndex == 5) {
+    nextDisk();
+    return;
+  }
+  if (screenIndex == 6) {
     nextStorage();
     return;
   }
-  if (screenIndex == 5 || screenIndex == 6) {
+  if (screenIndex == 7 || screenIndex == 8 || screenIndex == 9) {
     nextGuest();
     return;
   }
-  if (screenIndex == 7) {
+  if (screenIndex == 10) {
+    nextTask();
+    return;
+  }
+  if (screenIndex == 11) {
     nextAlert();
     return;
   }
