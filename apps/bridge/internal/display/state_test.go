@@ -27,3 +27,23 @@ func TestFinalizeSummary(t *testing.T) {
 		t.Fatalf("health = %q, want warning", got.Summary.Health)
 	}
 }
+
+func TestCompactForDisplayDropsHeavyInventory(t *testing.T) {
+	state := NewState()
+	state.Certificates = []Certificate{{ID: "cert"}}
+	state.StorageItems = []StorageItem{{ID: "item"}}
+	state.MetricTrends = []MetricTrend{{ID: "trend"}}
+	state.ClusterOptions = []ClusterOption{{ID: "option"}}
+	state.CephClusters = []CephCluster{{ID: "ceph"}}
+	state.Capabilities = []Capability{{ID: "cap"}}
+
+	got := CompactForDisplay(state)
+	if len(got.Certificates) != 0 ||
+		len(got.StorageItems) != 0 ||
+		len(got.MetricTrends) != 0 ||
+		len(got.ClusterOptions) != 0 ||
+		len(got.CephClusters) != 0 ||
+		len(got.Capabilities) != 0 {
+		t.Fatalf("compact state kept heavy inventory: %#v", got)
+	}
+}

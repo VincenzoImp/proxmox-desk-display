@@ -1,6 +1,7 @@
 package proxmox
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/display"
@@ -97,5 +98,71 @@ func TestAgentIPAddresses(t *testing.T) {
 	}})
 	if len(got) != 1 || got[0] != "192.168.1.50/24" {
 		t.Fatalf("agentIPAddresses = %#v", got)
+	}
+}
+
+func TestZFSPoolDisplayAcceptsNumericDedup(t *testing.T) {
+	var pools []zfsPool
+	if err := json.Unmarshal([]byte(`[{"name":"datapool","health":"ONLINE","size":1000,"alloc":200,"free":800,"frag":3,"dedup":1}]`), &pools); err != nil {
+		t.Fatalf("unmarshal zfs pools: %v", err)
+	}
+	host := display.Host{ID: "pve-1/pve", Name: "pve", Node: "pve"}
+	got := zfsPoolDisplay(&Client{id: "pve-1"}, &host, pools[0])
+	if got.Name != "datapool" || got.DedupRatio != "1" || got.Health != display.HealthOK {
+		t.Fatalf("zfs pool display = %#v", got)
+	}
+}
+
+func TestStorageItemSummary(t *testing.T) {
+	storage := display.Storage{Name: "local", Node: "pve", HostID: "pve-1/pve", HostName: "pve"}
+	item := storageItemDisplay(&Client{id: "pve-1"}, storage, storageContent{
+		VolID:     "local:backup/vzdump-qemu-100.vma.zst",
+		Content:   "backup",
+		Format:    "vma.zst",
+		Size:      1024,
+		CTime:     1770000000,
+		VMID:      float64(100),
+		Protected: 1,
+		Verification: map[string]any{
+			"state": "ok",
+		},
+	})
+	applyStorageItemSummary(&storage, item)
+	if item.VMID != "100" || !item.Protected || item.VerificationState != "ok" {
+		t.Fatalf("storage item = %#v", item)
+	}
+	if storage.ContentItems != 1 || storage.BackupCount != 1 {
+		t.Fatalf("storage summary = %#v", storage)
+	}
+}
+
+func TestAddCapabilityClassifiesForbidden(t *testing.T) {
+	state := display.NewState()
+	addCapability(&state, "pve-1", "pve-1/pve", "", "apt_updates", "/api2/json/nodes/pve/apt/update", &APIError{SourceID: "pve-1", StatusCode: 403})
+	if len(state.Capabilities) != 1 {
+		t.Fatalf("capabilities = %#v", state.Capabilities)
+	}
+	got := state.Capabilities[0]
+	if got.Status != "forbidden" || got.HTTPStatus != 403 {
+		t.Fatalf("capability = %#v", got)
+	}
+}
+
+func TestContainerIPAddresses(t *testing.T) {
+	got := containerIPAddresses([]containerInterface{
+		{
+			Name: "eth0",
+			IPAddresses: []struct {
+				IPAddress     string `json:"ip-address"`
+				IPAddressType string `json:"ip-address-type"`
+				Prefix        any    `json:"prefix"`
+			}{
+				{IPAddress: "192.168.1.20", Prefix: "24"},
+				{IPAddress: "fe80::1", Prefix: "64"},
+			},
+		},
+	})
+	if len(got) != 1 || got[0] != "192.168.1.20/24" {
+		t.Fatalf("containerIPAddresses = %#v", got)
 	}
 }

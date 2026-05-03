@@ -25,6 +25,16 @@ type Client struct {
 	http    *http.Client
 }
 
+type APIError struct {
+	SourceID   string
+	StatusCode int
+	Body       string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("proxmox %s returned HTTP %d: %s", e.SourceID, e.StatusCode, strings.TrimSpace(e.Body))
+}
+
 func NewClient(host config.ProxmoxHost) (*Client, error) {
 	transport, err := transportForTLS(host.TLS)
 	if err != nil {
@@ -61,7 +71,7 @@ func (c *Client) Get(ctx context.Context, path string, out any) error {
 		return err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		return fmt.Errorf("proxmox %s returned HTTP %d: %s", c.id, resp.StatusCode, strings.TrimSpace(string(body)))
+		return &APIError{SourceID: c.id, StatusCode: resp.StatusCode, Body: string(body)}
 	}
 
 	var envelope struct {

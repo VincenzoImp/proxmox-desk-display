@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/config"
+	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/display"
 	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/store"
 	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/version"
 )
@@ -37,6 +38,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("/", s.index)
 	s.mux.HandleFunc("/healthz", s.healthz)
 	s.mux.Handle("/api/v1/display-state", s.auth(http.HandlerFunc(s.displayState)))
+	s.mux.Handle("/api/v1/full-state", s.auth(http.HandlerFunc(s.fullState)))
 	s.mux.Handle("/api/v1/debug", s.auth(http.HandlerFunc(s.debug)))
 }
 
@@ -49,6 +51,17 @@ func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) displayState(w http.ResponseWriter, _ *http.Request) {
+	state, err := s.cache.State()
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error": err.Error(),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, display.CompactForDisplay(state))
+}
+
+func (s *Server) fullState(w http.ResponseWriter, _ *http.Request) {
 	state, err := s.cache.State()
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
@@ -129,7 +142,7 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!doctype html>
 <body>
   <h1>Proxmox Desk Display Bridge</h1>
   <p>Version {{.Version}}{{if .Mock}} · mock mode{{end}}</p>
-  <p>Display endpoint: <code>/api/v1/display-state</code></p>
+  <p>Display endpoint: <code>/api/v1/display-state</code> · full inventory: <code>/api/v1/full-state</code></p>
   <h2>Summary</h2>
   <p class="{{.State.Summary.Health}}">Health: {{.State.Summary.Health}}</p>
   <p>Hosts: {{.State.Summary.HostsOnline}}/{{.State.Summary.HostsTotal}} · Guests running: {{.State.Summary.GuestsRunning}} · Alerts: {{.State.Summary.Alerts}}</p>

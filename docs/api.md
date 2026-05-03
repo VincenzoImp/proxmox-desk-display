@@ -34,6 +34,10 @@ GET /api/v1/display-state
 Authorization: Bearer <display_token>
 ```
 
+This endpoint is compacted for ESP32-class devices. It includes the current
+display contract and omits heavier inventory arrays such as RRD trend samples,
+storage content listings, certificates, and capability diagnostics.
+
 Response:
 
 ```json
@@ -62,6 +66,12 @@ Response:
   "backup_jobs": [],
   "replications": [],
   "ha_resources": [],
+  "certificates": [],
+  "storage_items": [],
+  "metric_trends": [],
+  "cluster_options": [],
+  "ceph_clusters": [],
+  "capabilities": [],
   "updates": [],
   "repositories": [],
   "subscriptions": [],
@@ -86,6 +96,10 @@ Host objects include node-level detail for the Host Detail screen:
   "memory_pct": 27,
   "memory_used_bytes": 4435075072,
   "memory_total_bytes": 16609353728,
+  "memory_available_bytes": 12200000000,
+  "swap_pct": 0,
+  "iowait_pct": 1,
+  "ksm_shared_bytes": 0,
   "storage_pct": 20,
   "storage_used_bytes": 5787279360,
   "storage_total_bytes": 28971167744,
@@ -119,10 +133,13 @@ Storage objects power the Storage screen:
   "status": "available",
   "plugin_type": "zfspool",
   "content": "images",
+  "pool": "datapool",
+  "mountpoint": "/datapool",
   "shared": false,
   "disk_pct": 99,
   "disk_used_bytes": 7759663476736,
   "disk_total_bytes": 7834020347904,
+  "content_items": 0,
   "health": "critical"
 }
 ```
@@ -163,6 +180,9 @@ Guest objects include both utilization, allocated resources, parsed config devic
   "memory_pct": 13,
   "memory_used_bytes": 1105723392,
   "memory_total_bytes": 8589934592,
+  "swap_pct": 2,
+  "swap_used_bytes": 10932224,
+  "swap_total_bytes": 536870912,
   "disk_pct": 32,
   "disk_used_bytes": 10565300224,
   "disk_total_bytes": 33501757440,
@@ -178,6 +198,10 @@ Guest objects include both utilization, allocated resources, parsed config devic
   "agent_available": true,
   "agent_hostname": "docker",
   "agent_os": "Debian GNU/Linux",
+  "agent_version": "10.0.8",
+  "agent_command_count": 43,
+  "pid": 1346,
+  "ha_managed": false,
   "onboot": true,
   "protection": false,
   "template": false,
@@ -230,6 +254,26 @@ Task objects represent recent Proxmox node tasks, newest first. The bridge keeps
 }
 ```
 
+## Full State
+
+```http
+GET /api/v1/full-state
+Authorization: Bearer <display_token>
+```
+
+Returns the same base state plus heavy inventory data intended for richer
+dashboards, debugging, and future firmware page-specific endpoints:
+
+- `certificates`: node certificate inventory without PEM payloads, including expiry health.
+- `storage_items`: storage content listing such as ISO images, templates, backups, and volumes.
+- `metric_trends`: compact one-hour RRD trends, downsampled to 24 integer samples per metric.
+- `cluster_options`: readable Proxmox datacenter options.
+- `ceph_clusters`: Ceph summary when Ceph is configured.
+- `capabilities`: endpoint diagnostics, including permission failures such as `apt/update` returning HTTP 403 with `PVEAuditor`.
+
+Firmware should continue to use `/api/v1/display-state` until it has a page
+model that requests only the details needed for the current screen.
+
 ## Debug
 
 ```http
@@ -237,4 +281,4 @@ GET /api/v1/debug
 Authorization: Bearer <display_token>
 ```
 
-Returns the same display state plus bridge metadata. It is intended for local troubleshooting.
+Returns full state plus bridge metadata. It is intended for local troubleshooting.

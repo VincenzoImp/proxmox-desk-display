@@ -2,8 +2,11 @@ package proxmox
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"net/url"
 	"sort"
 	"strconv"
@@ -28,6 +31,11 @@ const (
 	maxDisplaySnapshots = 96
 	maxDisplayServices  = 96
 	maxDisplayNetworks  = 64
+	maxStorageItems     = 256
+	maxMetricTrends     = 384
+	maxTrendSamples     = 24
+	maxCapabilities     = 512
+	maxClusterOptions   = 64
 	maxGuestDisks       = 12
 	maxGuestNICs        = 8
 	maxGuestIPs         = 8
@@ -86,6 +94,12 @@ func (c *Collector) Collect(ctx context.Context) (display.State, error) {
 		state.BackupJobs = append(state.BackupJobs, res.state.BackupJobs...)
 		state.Replications = append(state.Replications, res.state.Replications...)
 		state.HAResources = append(state.HAResources, res.state.HAResources...)
+		state.Certificates = append(state.Certificates, res.state.Certificates...)
+		state.StorageItems = append(state.StorageItems, res.state.StorageItems...)
+		state.MetricTrends = append(state.MetricTrends, res.state.MetricTrends...)
+		state.ClusterOptions = append(state.ClusterOptions, res.state.ClusterOptions...)
+		state.CephClusters = append(state.CephClusters, res.state.CephClusters...)
+		state.Capabilities = append(state.Capabilities, res.state.Capabilities...)
 		state.Updates = append(state.Updates, res.state.Updates...)
 		state.Repositories = append(state.Repositories, res.state.Repositories...)
 		state.Subscriptions = append(state.Subscriptions, res.state.Subscriptions...)
@@ -132,6 +146,29 @@ func (c *Collector) Collect(ctx context.Context) (display.State, error) {
 	sort.Slice(state.BackupJobs, func(i, j int) bool { return state.BackupJobs[i].ID < state.BackupJobs[j].ID })
 	sort.Slice(state.Replications, func(i, j int) bool { return state.Replications[i].ID < state.Replications[j].ID })
 	sort.Slice(state.HAResources, func(i, j int) bool { return state.HAResources[i].ID < state.HAResources[j].ID })
+	sort.Slice(state.Certificates, func(i, j int) bool { return state.Certificates[i].ID < state.Certificates[j].ID })
+	sort.Slice(state.StorageItems, func(i, j int) bool {
+		if state.StorageItems[i].CreatedAt != state.StorageItems[j].CreatedAt {
+			return state.StorageItems[i].CreatedAt > state.StorageItems[j].CreatedAt
+		}
+		return state.StorageItems[i].ID < state.StorageItems[j].ID
+	})
+	if len(state.StorageItems) > maxStorageItems {
+		state.StorageItems = state.StorageItems[:maxStorageItems]
+	}
+	sort.Slice(state.MetricTrends, func(i, j int) bool { return state.MetricTrends[i].ID < state.MetricTrends[j].ID })
+	if len(state.MetricTrends) > maxMetricTrends {
+		state.MetricTrends = state.MetricTrends[:maxMetricTrends]
+	}
+	sort.Slice(state.ClusterOptions, func(i, j int) bool { return state.ClusterOptions[i].ID < state.ClusterOptions[j].ID })
+	if len(state.ClusterOptions) > maxClusterOptions {
+		state.ClusterOptions = state.ClusterOptions[:maxClusterOptions]
+	}
+	sort.Slice(state.CephClusters, func(i, j int) bool { return state.CephClusters[i].ID < state.CephClusters[j].ID })
+	sort.Slice(state.Capabilities, func(i, j int) bool { return state.Capabilities[i].ID < state.Capabilities[j].ID })
+	if len(state.Capabilities) > maxCapabilities {
+		state.Capabilities = state.Capabilities[:maxCapabilities]
+	}
 	sort.Slice(state.Updates, func(i, j int) bool { return state.Updates[i].ID < state.Updates[j].ID })
 	if len(state.Updates) > maxDisplayUpdates {
 		state.Updates = state.Updates[:maxDisplayUpdates]
@@ -183,6 +220,7 @@ func (c *Collector) collectSource(ctx context.Context, client *Client) (display.
 		Quorate:  true,
 	}
 	if statuses, err := c.clusterStatus(ctx, client); err == nil {
+		addCapability(&state, client.id, "", "", "cluster_status", "/api2/json/cluster/status", nil)
 		applyClusterStatus(&cluster, statuses)
 		if !cluster.Quorate {
 			cluster.Health = display.HealthCritical
@@ -195,16 +233,27 @@ func (c *Collector) collectSource(ctx context.Context, client *Client) (display.
 			})
 		}
 	} else {
+		addCapability(&state, client.id, "", "", "cluster_status", "/api2/json/cluster/status", err)
 		addClusterWarning(&cluster, "cluster status unavailable")
 	}
+	if options, err := c.clusterOptions(ctx, client); err == nil {
+		addCapability(&state, client.id, "", "", "cluster_options", "/api2/json/cluster/options", nil)
+		state.ClusterOptions = append(state.ClusterOptions, clusterOptionsDisplay(client, options)...)
+	} else {
+		addCapability(&state, client.id, "", "", "cluster_options", "/api2/json/cluster/options", err)
+		addClusterWarning(&cluster, "cluster options unavailable")
+	}
 	if jobs, err := c.clusterBackupJobs(ctx, client); err == nil {
+		addCapability(&state, client.id, "", "", "backup_jobs", "/api2/json/cluster/backup", nil)
 		for _, job := range jobs {
 			state.BackupJobs = append(state.BackupJobs, backupJobDisplay(client, job))
 		}
 	} else {
+		addCapability(&state, client.id, "", "", "backup_jobs", "/api2/json/cluster/backup", err)
 		addClusterWarning(&cluster, "backup jobs unavailable")
 	}
 	if haResources, err := c.clusterHAResources(ctx, client); err == nil {
+		addCapability(&state, client.id, "", "", "ha_resources", "/api2/json/cluster/ha/resources", nil)
 		for _, resource := range haResources {
 			displayResource := haResourceDisplay(client, resource)
 			if displayResource.Health == display.HealthWarning || displayResource.Health == display.HealthCritical {
@@ -220,7 +269,34 @@ func (c *Collector) collectSource(ctx context.Context, client *Client) (display.
 			state.HAResources = append(state.HAResources, displayResource)
 		}
 	} else {
+		addCapability(&state, client.id, "", "", "ha_resources", "/api2/json/cluster/ha/resources", err)
 		addClusterWarning(&cluster, "HA unavailable")
+	}
+	if cephCluster, err := c.cephCluster(ctx, client); err == nil && cephCluster != nil {
+		addCapability(&state, client.id, "", "", "ceph", "/api2/json/cluster/ceph/status", nil)
+		if cephCluster.Health == display.HealthWarning || cephCluster.Health == display.HealthCritical {
+			cluster.Health = maxHealth(cluster.Health, cephCluster.Health)
+			state.Alerts = append(state.Alerts, display.Alert{
+				ID:       cephCluster.ID + "/health",
+				SourceID: client.id,
+				Severity: cephCluster.Health,
+				Title:    client.name + " Ceph",
+				Message:  firstNonEmpty(cephCluster.HealthText, "not healthy"),
+			})
+		}
+		state.CephClusters = append(state.CephClusters, *cephCluster)
+	} else if err != nil {
+		addCapability(&state, client.id, "", "", "ceph", "/api2/json/cluster/ceph/status", err)
+	}
+	storageConfigByName := map[string]storageConfig{}
+	if configs, err := c.clusterStorage(ctx, client); err == nil {
+		addCapability(&state, client.id, "", "", "storage_config", "/api2/json/storage", nil)
+		for _, cfg := range configs {
+			storageConfigByName[cfg.Storage] = cfg
+		}
+	} else {
+		addCapability(&state, client.id, "", "", "storage_config", "/api2/json/storage", err)
+		addClusterWarning(&cluster, "storage config unavailable")
 	}
 	hostByNode := map[string]*display.Host{}
 	for _, r := range resources {
@@ -266,12 +342,20 @@ func (c *Collector) collectSource(ctx context.Context, client *Client) (display.
 				host.MemoryPct = pctInt64(status.Memory.Used, status.Memory.Total)
 				host.MemoryUsedBytes = status.Memory.Used
 				host.MemoryTotalBytes = status.Memory.Total
+				host.MemoryAvailableBytes = status.Memory.Available
+			}
+			if status.Swap.Total > 0 {
+				host.SwapPct = pctInt64(status.Swap.Used, status.Swap.Total)
+				host.SwapUsedBytes = status.Swap.Used
+				host.SwapTotalBytes = status.Swap.Total
 			}
 			if status.RootFS.Total > 0 {
 				host.StoragePct = pctInt64(status.RootFS.Used, status.RootFS.Total)
 				host.StorageUsedBytes = status.RootFS.Used
 				host.StorageTotalBytes = status.RootFS.Total
 			}
+			host.IOWaitPct = pctFloat(status.Wait)
+			host.KSMSharedBytes = status.KSM.Shared
 			if status.Uptime > 0 {
 				host.UptimeSec = status.Uptime
 			}
@@ -282,6 +366,34 @@ func (c *Collector) collectSource(ctx context.Context, client *Client) (display.
 			host.LoadAvg = status.LoadAvg
 			host.PVEVersion = status.PVEVersion
 			host.KernelVersion = firstNonEmpty(status.KVersion, status.CurrentKernel.Release)
+		}
+		if certs, err := c.nodeCertificates(ctx, client, node); err == nil {
+			addCapability(&state, client.id, host.ID, "", "node_certificates", "/api2/json/nodes/"+node+"/certificates/info", nil)
+			for _, cert := range certs {
+				displayCert := certificateDisplay(client, host, cert, time.Now())
+				if displayCert.Health == display.HealthWarning || displayCert.Health == display.HealthCritical {
+					host.Health = maxHealth(host.Health, displayCert.Health)
+					state.Alerts = append(state.Alerts, display.Alert{
+						ID:       displayCert.ID + "/expiry",
+						SourceID: client.id,
+						HostID:   host.ID,
+						Severity: displayCert.Health,
+						Title:    host.Name + " cert " + displayCert.Filename,
+						Message:  fmt.Sprintf("expires in %d days", displayCert.DaysRemaining),
+					})
+				}
+				state.Certificates = append(state.Certificates, displayCert)
+			}
+		} else {
+			addCapability(&state, client.id, host.ID, "", "node_certificates", "/api2/json/nodes/"+node+"/certificates/info", err)
+			addDataWarning(host, "certificates unavailable")
+		}
+		if rrd, err := c.nodeRRDData(ctx, client, node); err == nil {
+			addCapability(&state, client.id, host.ID, "", "node_rrd", "/api2/json/nodes/"+node+"/rrddata", nil)
+			state.MetricTrends = append(state.MetricTrends, nodeMetricTrends(client, host, rrd)...)
+		} else {
+			addCapability(&state, client.id, host.ID, "", "node_rrd", "/api2/json/nodes/"+node+"/rrddata", err)
+			addDataWarning(host, "node trend unavailable")
 		}
 		if devices, err := c.nodePCI(ctx, client, node); err == nil {
 			host.GPUCount, host.GPUSummary = summarizeGPUs(devices)
@@ -323,8 +435,14 @@ func (c *Collector) collectSource(ctx context.Context, client *Client) (display.
 			addDataWarning(host, "services unavailable")
 		}
 		if pools, err := c.nodeZFSPools(ctx, client, node); err == nil {
+			addCapability(&state, client.id, host.ID, "", "zfs_pools", "/api2/json/nodes/"+node+"/disks/zfs", nil)
 			for _, pool := range pools {
 				displayPool := zfsPoolDisplay(client, host, pool)
+				if detail, err := c.nodeZFSPoolDetail(ctx, client, node, displayPool.Name); err == nil {
+					applyZFSPoolDetail(&displayPool, detail)
+				} else {
+					addCapability(&state, client.id, host.ID, "", "zfs_pool_detail", "/api2/json/nodes/"+node+"/disks/zfs/"+displayPool.Name, err)
+				}
 				if displayPool.Health == display.HealthWarning || displayPool.Health == display.HealthCritical {
 					host.Health = maxHealth(host.Health, displayPool.Health)
 					state.Alerts = append(state.Alerts, display.Alert{
@@ -339,24 +457,30 @@ func (c *Collector) collectSource(ctx context.Context, client *Client) (display.
 				state.ZFSPools = append(state.ZFSPools, displayPool)
 			}
 		} else {
+			addCapability(&state, client.id, host.ID, "", "zfs_pools", "/api2/json/nodes/"+node+"/disks/zfs", err)
 			addDataWarning(host, "zfs unavailable")
 		}
 		if updates, err := c.nodeAPTUpdates(ctx, client, node); err == nil {
+			addCapability(&state, client.id, host.ID, "", "apt_updates", "/api2/json/nodes/"+node+"/apt/update", nil)
 			host.UpdatesAvailable = len(updates)
 			for _, update := range updates {
 				state.Updates = append(state.Updates, updateDisplay(client, host, update))
 			}
 		} else {
+			addCapability(&state, client.id, host.ID, "", "apt_updates", "/api2/json/nodes/"+node+"/apt/update", err)
 			addDataWarning(host, "updates unavailable")
 		}
 		if repos, err := c.nodeAPTRepositories(ctx, client, node); err == nil {
+			addCapability(&state, client.id, host.ID, "", "apt_repositories", "/api2/json/nodes/"+node+"/apt/repositories", nil)
 			for _, repo := range repositoriesDisplay(client, host, repos) {
 				state.Repositories = append(state.Repositories, repo)
 			}
 		} else {
+			addCapability(&state, client.id, host.ID, "", "apt_repositories", "/api2/json/nodes/"+node+"/apt/repositories", err)
 			addDataWarning(host, "repositories unavailable")
 		}
 		if subscription, err := c.nodeSubscription(ctx, client, node); err == nil {
+			addCapability(&state, client.id, host.ID, "", "subscription", "/api2/json/nodes/"+node+"/subscription", nil)
 			displaySubscription := subscriptionDisplay(client, host, subscription)
 			host.SubscriptionStatus = displaySubscription.Status
 			if displaySubscription.Health == display.HealthWarning {
@@ -364,6 +488,7 @@ func (c *Collector) collectSource(ctx context.Context, client *Client) (display.
 			}
 			state.Subscriptions = append(state.Subscriptions, displaySubscription)
 		} else {
+			addCapability(&state, client.id, host.ID, "", "subscription", "/api2/json/nodes/"+node+"/subscription", err)
 			addDataWarning(host, "subscription unavailable")
 		}
 		if disks, err := c.nodeDisks(ctx, client, node); err == nil {
@@ -419,6 +544,21 @@ func (c *Collector) collectSource(ctx context.Context, client *Client) (display.
 			DiskTotalBytes: r.MaxDisk,
 			Health:         display.HealthOK,
 		}
+		if cfg, ok := storageConfigByName[storageName]; ok {
+			applyStorageConfig(&storage, cfg)
+		}
+		if storageContentQueryable(storage) {
+			if items, err := c.storageContent(ctx, client, nodeName, storageName); err == nil {
+				addCapability(&state, client.id, hostID, "", "storage_content", "/api2/json/nodes/"+nodeName+"/storage/"+storageName+"/content", nil)
+				for _, item := range items {
+					displayItem := storageItemDisplay(client, storage, item)
+					applyStorageItemSummary(&storage, displayItem)
+					state.StorageItems = append(state.StorageItems, displayItem)
+				}
+			} else {
+				addCapability(&state, client.id, hostID, "", "storage_content", "/api2/json/nodes/"+nodeName+"/storage/"+storageName+"/content", err)
+			}
+		}
 		c.applyStorageAlerts(&state, &storage)
 		if host, ok := hostByNode[nodeName]; ok && storage.DiskPct >= host.StorageMaxPct {
 			host.StorageMaxPct = storage.DiskPct
@@ -472,6 +612,19 @@ func (c *Collector) collectSource(ctx context.Context, client *Client) (display.
 		} else {
 			guest.ConfigWarning = "config unavailable"
 		}
+		if current, err := c.guestStatus(ctx, client, r.Node, r.Type, vmid); err == nil {
+			addCapability(&state, client.id, hostID, guest.ID, "guest_status", "/api2/json/nodes/"+r.Node+"/"+r.Type+"/"+vmid+"/status/current", nil)
+			applyGuestStatus(&guest, current)
+		} else {
+			addCapability(&state, client.id, hostID, guest.ID, "guest_status", "/api2/json/nodes/"+r.Node+"/"+r.Type+"/"+vmid+"/status/current", err)
+			guest.ConfigWarning = firstNonEmpty(guest.ConfigWarning, "status unavailable")
+		}
+		if rrd, err := c.guestRRDData(ctx, client, r.Node, r.Type, vmid); err == nil {
+			addCapability(&state, client.id, hostID, guest.ID, "guest_rrd", "/api2/json/nodes/"+r.Node+"/"+r.Type+"/"+vmid+"/rrddata", nil)
+			state.MetricTrends = append(state.MetricTrends, guestMetricTrends(client, guest, rrd)...)
+		} else {
+			addCapability(&state, client.id, hostID, guest.ID, "guest_rrd", "/api2/json/nodes/"+r.Node+"/"+r.Type+"/"+vmid+"/rrddata", err)
+		}
 		if snapshots, err := c.guestSnapshots(ctx, client, r.Node, r.Type, vmid); err == nil {
 			for _, snapshot := range snapshots {
 				if snapshot.Name == "current" {
@@ -484,7 +637,24 @@ func (c *Collector) collectSource(ctx context.Context, client *Client) (display.
 		}
 		if guest.Type == "qemu" && guest.Status == "running" && guest.AgentEnabled {
 			if err := c.applyGuestAgent(ctx, client, r.Node, vmid, &guest); err != nil {
+				addCapability(&state, client.id, hostID, guest.ID, "qemu_guest_agent", "/api2/json/nodes/"+r.Node+"/qemu/"+vmid+"/agent", err)
 				guest.AgentWarning = "agent unavailable"
+			} else {
+				addCapability(&state, client.id, hostID, guest.ID, "qemu_guest_agent", "/api2/json/nodes/"+r.Node+"/qemu/"+vmid+"/agent", nil)
+			}
+		}
+		if guest.Type == "lxc" && guest.Status == "running" {
+			if interfaces, err := c.containerInterfaces(ctx, client, r.Node, vmid); err == nil {
+				addCapability(&state, client.id, hostID, guest.ID, "lxc_interfaces", "/api2/json/nodes/"+r.Node+"/lxc/"+vmid+"/interfaces", nil)
+				ips := containerIPAddresses(interfaces)
+				if len(ips) > 0 {
+					guest.IPAddresses = ips
+					if placeholderIPAddress(guest.IPAddress) {
+						guest.IPAddress = ips[0]
+					}
+				}
+			} else {
+				addCapability(&state, client.id, hostID, guest.ID, "lxc_interfaces", "/api2/json/nodes/"+r.Node+"/lxc/"+vmid+"/interfaces", err)
 			}
 		}
 		if pinned && pin.Expected != "" && guest.Status != pin.Expected {
@@ -511,7 +681,16 @@ func (c *Collector) collectSource(ctx context.Context, client *Client) (display.
 	}
 
 	if replications, err := c.clusterReplications(ctx, client); err == nil {
+		addCapability(&state, client.id, "", "", "replication", "/api2/json/cluster/replication", nil)
 		for _, replication := range replications {
+			if replication.Source != "" && replication.ID != "" {
+				if status, err := c.replicationStatus(ctx, client, replication.Source, replication.ID); err == nil {
+					addCapability(&state, client.id, client.id+"/"+replication.Source, "", "replication_status", "/api2/json/nodes/"+replication.Source+"/replication/"+replication.ID+"/status", nil)
+					applyReplicationStatus(&replication, status)
+				} else {
+					addCapability(&state, client.id, client.id+"/"+replication.Source, "", "replication_status", "/api2/json/nodes/"+replication.Source+"/replication/"+replication.ID+"/status", err)
+				}
+			}
 			displayReplication := replicationDisplay(client, replication, guestBySourceVMID)
 			if displayReplication.Health == display.HealthWarning || displayReplication.Health == display.HealthCritical {
 				cluster.Health = maxHealth(cluster.Health, displayReplication.Health)
@@ -527,6 +706,7 @@ func (c *Collector) collectSource(ctx context.Context, client *Client) (display.
 			state.Replications = append(state.Replications, displayReplication)
 		}
 	} else {
+		addCapability(&state, client.id, "", "", "replication", "/api2/json/cluster/replication", err)
 		addClusterWarning(&cluster, "replication unavailable")
 	}
 
@@ -635,10 +815,46 @@ func (c *Collector) clusterReplications(ctx context.Context, client *Client) ([]
 	return replications, err
 }
 
+func (c *Collector) replicationStatus(ctx context.Context, client *Client, node string, id string) (replicationStatus, error) {
+	var status replicationStatus
+	err := client.Get(ctx, "/api2/json/nodes/"+url.PathEscape(node)+"/replication/"+url.PathEscape(id)+"/status", &status)
+	return status, err
+}
+
+func (c *Collector) clusterOptions(ctx context.Context, client *Client) (map[string]any, error) {
+	var options map[string]any
+	err := client.Get(ctx, "/api2/json/cluster/options", &options)
+	return options, err
+}
+
+func (c *Collector) clusterStorage(ctx context.Context, client *Client) ([]storageConfig, error) {
+	var storages []storageConfig
+	err := client.Get(ctx, "/api2/json/storage", &storages)
+	return storages, err
+}
+
 func (c *Collector) nodeZFSPools(ctx context.Context, client *Client, node string) ([]zfsPool, error) {
 	var pools []zfsPool
 	err := client.Get(ctx, "/api2/json/nodes/"+url.PathEscape(node)+"/disks/zfs", &pools)
 	return pools, err
+}
+
+func (c *Collector) nodeZFSPoolDetail(ctx context.Context, client *Client, node string, pool string) (zfsPoolDetail, error) {
+	var detail zfsPoolDetail
+	err := client.Get(ctx, "/api2/json/nodes/"+url.PathEscape(node)+"/disks/zfs/"+url.PathEscape(pool), &detail)
+	return detail, err
+}
+
+func (c *Collector) nodeCertificates(ctx context.Context, client *Client, node string) ([]nodeCertificate, error) {
+	var certs []nodeCertificate
+	err := client.Get(ctx, "/api2/json/nodes/"+url.PathEscape(node)+"/certificates/info", &certs)
+	return certs, err
+}
+
+func (c *Collector) nodeRRDData(ctx context.Context, client *Client, node string) ([]rrdPoint, error) {
+	var points []rrdPoint
+	err := client.Get(ctx, "/api2/json/nodes/"+url.PathEscape(node)+"/rrddata?timeframe=hour&cf=AVERAGE", &points)
+	return points, err
 }
 
 func (c *Collector) nodeAPTUpdates(ctx context.Context, client *Client, node string) ([]aptUpdate, error) {
@@ -679,8 +895,78 @@ func (c *Collector) guestSnapshots(ctx context.Context, client *Client, node str
 	return snapshots, err
 }
 
+func (c *Collector) guestStatus(ctx context.Context, client *Client, node string, guestType string, vmid string) (guestStatus, error) {
+	var status guestStatus
+	pathType := "qemu"
+	if guestType == "lxc" {
+		pathType = "lxc"
+	}
+	err := client.Get(ctx, "/api2/json/nodes/"+url.PathEscape(node)+"/"+pathType+"/"+url.PathEscape(vmid)+"/status/current", &status)
+	return status, err
+}
+
+func (c *Collector) guestRRDData(ctx context.Context, client *Client, node string, guestType string, vmid string) ([]rrdPoint, error) {
+	var points []rrdPoint
+	pathType := "qemu"
+	if guestType == "lxc" {
+		pathType = "lxc"
+	}
+	err := client.Get(ctx, "/api2/json/nodes/"+url.PathEscape(node)+"/"+pathType+"/"+url.PathEscape(vmid)+"/rrddata?timeframe=hour&cf=AVERAGE", &points)
+	return points, err
+}
+
+func (c *Collector) containerInterfaces(ctx context.Context, client *Client, node string, vmid string) ([]containerInterface, error) {
+	var interfaces []containerInterface
+	err := client.Get(ctx, "/api2/json/nodes/"+url.PathEscape(node)+"/lxc/"+url.PathEscape(vmid)+"/interfaces", &interfaces)
+	return interfaces, err
+}
+
+func (c *Collector) storageContent(ctx context.Context, client *Client, node string, storage string) ([]storageContent, error) {
+	var contents []storageContent
+	err := client.Get(ctx, "/api2/json/nodes/"+url.PathEscape(node)+"/storage/"+url.PathEscape(storage)+"/content", &contents)
+	return contents, err
+}
+
+func (c *Collector) cephCluster(ctx context.Context, client *Client) (*display.CephCluster, error) {
+	var status cephStatus
+	if err := client.Get(ctx, "/api2/json/cluster/ceph/status", &status); err != nil {
+		return nil, err
+	}
+	var df cephDF
+	_ = client.Get(ctx, "/api2/json/cluster/ceph/df", &df)
+	healthText := strings.TrimPrefix(status.Health.Status, "HEALTH_")
+	if healthText == "" {
+		healthText = status.Health.Status
+	}
+	used := df.Summary.TotalUsedBytes
+	total := df.Summary.TotalBytes
+	return &display.CephCluster{
+		ID:             client.id + "/ceph",
+		SourceID:       client.id,
+		FSID:           status.FSID,
+		HealthText:     healthText,
+		TotalBytes:     total,
+		UsedBytes:      used,
+		AvailableBytes: df.Summary.TotalAvailBytes,
+		UsagePct:       pctInt64(used, total),
+		OSDs:           status.OSDMap.OSDMap.NumOSDs,
+		OSDsUp:         status.OSDMap.OSDMap.NumUp,
+		OSDsIn:         status.OSDMap.OSDMap.NumIn,
+		PGs:            status.PGMap.NumPGs,
+		Health:         healthFromText(healthText),
+	}, nil
+}
+
 func (c *Collector) applyGuestAgent(ctx context.Context, client *Client, node string, vmid string, guest *display.Guest) error {
 	var firstErr error
+	var info agentInfo
+	if err := client.Get(ctx, "/api2/json/nodes/"+url.PathEscape(node)+"/qemu/"+url.PathEscape(vmid)+"/agent/info", &info); err == nil {
+		guest.AgentAvailable = true
+		guest.AgentVersion = info.Result.Version
+		guest.AgentCommandCount = len(info.Result.SupportedCommands)
+	} else {
+		firstErr = err
+	}
 	var hostname agentHostname
 	if err := client.Get(ctx, "/api2/json/nodes/"+url.PathEscape(node)+"/qemu/"+url.PathEscape(vmid)+"/agent/get-host-name", &hostname); err == nil {
 		guest.AgentAvailable = true
@@ -699,7 +985,7 @@ func (c *Collector) applyGuestAgent(ctx context.Context, client *Client, node st
 	if err := client.Get(ctx, "/api2/json/nodes/"+url.PathEscape(node)+"/qemu/"+url.PathEscape(vmid)+"/agent/network-get-interfaces", &networks); err == nil {
 		guest.AgentAvailable = true
 		guest.IPAddresses = agentIPAddresses(networks)
-		if guest.IPAddress == "" && len(guest.IPAddresses) > 0 {
+		if placeholderIPAddress(guest.IPAddress) && len(guest.IPAddresses) > 0 {
 			guest.IPAddress = guest.IPAddresses[0]
 		}
 	} else if firstErr == nil {
@@ -831,10 +1117,19 @@ type nodeStatus struct {
 	LoadAvg    []string `json:"loadavg"`
 	PVEVersion string   `json:"pveversion"`
 	KVersion   string   `json:"kversion"`
+	Wait       float64  `json:"wait"`
 	Memory     struct {
+		Used      int64 `json:"used"`
+		Total     int64 `json:"total"`
+		Available int64 `json:"available"`
+	} `json:"memory"`
+	Swap struct {
 		Used  int64 `json:"used"`
 		Total int64 `json:"total"`
-	} `json:"memory"`
+	} `json:"swap"`
+	KSM struct {
+		Shared int64 `json:"shared"`
+	} `json:"ksm"`
 	RootFS struct {
 		Used  int64 `json:"used"`
 		Total int64 `json:"total"`
@@ -848,6 +1143,42 @@ type nodeStatus struct {
 		Release string `json:"release"`
 		Version string `json:"version"`
 	} `json:"current-kernel"`
+}
+
+type nodeCertificate struct {
+	Filename      string   `json:"filename"`
+	Subject       string   `json:"subject"`
+	Issuer        string   `json:"issuer"`
+	SANs          []string `json:"san"`
+	Fingerprint   string   `json:"fingerprint"`
+	PublicKeyType string   `json:"public-key-type"`
+	PublicKeyBits int      `json:"public-key-bits"`
+	NotBefore     int64    `json:"notbefore"`
+	NotAfter      int64    `json:"notafter"`
+}
+
+type storageConfig struct {
+	Storage    string `json:"storage"`
+	Type       string `json:"type"`
+	Content    string `json:"content"`
+	Path       string `json:"path"`
+	Pool       string `json:"pool"`
+	Mountpoint string `json:"mountpoint"`
+	Nodes      string `json:"nodes"`
+	Shared     any    `json:"shared"`
+}
+
+type storageContent struct {
+	VolID        string         `json:"volid"`
+	Content      string         `json:"content"`
+	Format       string         `json:"format"`
+	Size         int64          `json:"size"`
+	CTime        int64          `json:"ctime"`
+	VMID         any            `json:"vmid"`
+	Notes        string         `json:"notes"`
+	Protected    int            `json:"protected"`
+	Verification map[string]any `json:"verification"`
+	Verified     int64          `json:"verified"`
 }
 
 type pciDevice struct {
@@ -943,17 +1274,33 @@ type haResource struct {
 }
 
 type replicationJob struct {
-	ID       string `json:"id"`
-	Guest    int    `json:"guest"`
-	Source   string `json:"source"`
-	Target   string `json:"target"`
-	Schedule string `json:"schedule"`
-	Rate     int64  `json:"rate"`
-	Disable  int    `json:"disable"`
-	LastSync int64  `json:"last_sync"`
-	NextSync int64  `json:"next_sync"`
-	Error    string `json:"error"`
-	Type     string `json:"type"`
+	ID             string `json:"id"`
+	Guest          int    `json:"guest"`
+	Source         string `json:"source"`
+	Target         string `json:"target"`
+	Schedule       string `json:"schedule"`
+	Rate           int64  `json:"rate"`
+	Disable        int    `json:"disable"`
+	Status         string `json:"status"`
+	State          string `json:"state"`
+	Duration       int64  `json:"duration"`
+	FailCount      int    `json:"fail_count"`
+	LastSync       int64  `json:"last_sync"`
+	NextSync       int64  `json:"next_sync"`
+	LastSyncStatus string `json:"last_sync_status"`
+	Error          string `json:"error"`
+	Type           string `json:"type"`
+}
+
+type replicationStatus struct {
+	Status         string `json:"status"`
+	State          string `json:"state"`
+	Duration       int64  `json:"duration"`
+	FailCount      int    `json:"fail_count"`
+	LastSync       int64  `json:"last_sync"`
+	NextSync       int64  `json:"next_sync"`
+	LastSyncStatus string `json:"last_sync_status"`
+	Error          string `json:"error"`
 }
 
 type zfsPool struct {
@@ -965,7 +1312,116 @@ type zfsPool struct {
 	Alloc  int64  `json:"alloc"`
 	Free   int64  `json:"free"`
 	Frag   int    `json:"frag"`
-	Dedup  string `json:"dedup"`
+	Dedup  any    `json:"dedup"`
+}
+
+type zfsPoolDetail struct {
+	Name     string          `json:"name"`
+	State    string          `json:"state"`
+	Status   string          `json:"status"`
+	Scan     string          `json:"scan"`
+	Errors   string          `json:"errors"`
+	Leaf     int             `json:"leaf"`
+	Read     int64           `json:"read"`
+	Write    int64           `json:"write"`
+	Checksum int64           `json:"cksum"`
+	Children []zfsPoolDetail `json:"children"`
+}
+
+type rrdPoint struct {
+	Time               int64   `json:"time"`
+	CPU                float64 `json:"cpu"`
+	MaxCPU             float64 `json:"maxcpu"`
+	Mem                float64 `json:"mem"`
+	MemHost            float64 `json:"memhost"`
+	MemUsed            float64 `json:"memused"`
+	MemAvailable       float64 `json:"memavailable"`
+	MaxMem             float64 `json:"maxmem"`
+	MemTotal           float64 `json:"memtotal"`
+	Disk               float64 `json:"disk"`
+	MaxDisk            float64 `json:"maxdisk"`
+	RootUsed           float64 `json:"rootused"`
+	RootTotal          float64 `json:"roottotal"`
+	NetIn              float64 `json:"netin"`
+	NetOut             float64 `json:"netout"`
+	DiskRead           float64 `json:"diskread"`
+	DiskWrite          float64 `json:"diskwrite"`
+	IOWait             float64 `json:"iowait"`
+	PressureIOSome     float64 `json:"pressureiosome"`
+	PressureIOFull     float64 `json:"pressureiofull"`
+	PressureCPUSome    float64 `json:"pressurecpusome"`
+	PressureCPUFull    float64 `json:"pressurecpufull"`
+	PressureMemorySome float64 `json:"pressurememorysome"`
+	PressureMemoryFull float64 `json:"pressurememoryfull"`
+}
+
+type guestStatus struct {
+	Status             string  `json:"status"`
+	QMPStatus          string  `json:"qmpstatus"`
+	CPU                float64 `json:"cpu"`
+	CPUs               int     `json:"cpus"`
+	Mem                int64   `json:"mem"`
+	MemHost            int64   `json:"memhost"`
+	MaxMem             int64   `json:"maxmem"`
+	Swap               int64   `json:"swap"`
+	MaxSwap            int64   `json:"maxswap"`
+	Disk               int64   `json:"disk"`
+	MaxDisk            int64   `json:"maxdisk"`
+	DiskRead           int64   `json:"diskread"`
+	DiskWrite          int64   `json:"diskwrite"`
+	NetIn              int64   `json:"netin"`
+	NetOut             int64   `json:"netout"`
+	Uptime             int64   `json:"uptime"`
+	PID                int     `json:"pid"`
+	Tags               string  `json:"tags"`
+	RunningQEMU        string  `json:"running-qemu"`
+	PressureCPUSome    any     `json:"pressurecpusome"`
+	PressureCPUFull    any     `json:"pressurecpufull"`
+	PressureIOSome     any     `json:"pressureiosome"`
+	PressureIOFull     any     `json:"pressureiofull"`
+	PressureMemorySome any     `json:"pressurememorysome"`
+	PressureMemoryFull any     `json:"pressurememoryfull"`
+	HA                 struct {
+		Managed int `json:"managed"`
+	} `json:"ha"`
+}
+
+type containerInterface struct {
+	Name            string `json:"name"`
+	Inet            string `json:"inet"`
+	Inet6           string `json:"inet6"`
+	HardwareAddress string `json:"hardware-address"`
+	HWAddr          string `json:"hwaddr"`
+	IPAddresses     []struct {
+		IPAddress     string `json:"ip-address"`
+		IPAddressType string `json:"ip-address-type"`
+		Prefix        any    `json:"prefix"`
+	} `json:"ip-addresses"`
+}
+
+type cephStatus struct {
+	FSID   string `json:"fsid"`
+	Health struct {
+		Status string `json:"status"`
+	} `json:"health"`
+	OSDMap struct {
+		OSDMap struct {
+			NumOSDs int `json:"num_osds"`
+			NumUp   int `json:"num_up_osds"`
+			NumIn   int `json:"num_in_osds"`
+		} `json:"osdmap"`
+	} `json:"osdmap"`
+	PGMap struct {
+		NumPGs int `json:"num_pgs"`
+	} `json:"pgmap"`
+}
+
+type cephDF struct {
+	Summary struct {
+		TotalBytes      int64 `json:"total_bytes"`
+		TotalUsedBytes  int64 `json:"total_used_bytes"`
+		TotalAvailBytes int64 `json:"total_avail_bytes"`
+	} `json:"summary"`
 }
 
 type aptUpdate struct {
@@ -1018,6 +1474,16 @@ type guestSnapshot struct {
 	SnapTime    int64  `json:"snaptime"`
 	Parent      string `json:"parent"`
 	VMState     int    `json:"vmstate"`
+}
+
+type agentInfo struct {
+	Result struct {
+		Version           string `json:"version"`
+		SupportedCommands []struct {
+			Name    string `json:"name"`
+			Enabled bool   `json:"enabled"`
+		} `json:"supported_commands"`
+	} `json:"result"`
 }
 
 type agentHostname struct {
@@ -1127,6 +1593,139 @@ func applyClusterStatus(cluster *display.Cluster, statuses []clusterStatus) {
 	}
 }
 
+func clusterOptionsDisplay(client *Client, options map[string]any) []display.ClusterOption {
+	keys := make([]string, 0, len(options))
+	for key := range options {
+		if key == "digest" {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]display.ClusterOption, 0, len(keys))
+	for _, key := range keys {
+		value := compactValue(options[key])
+		out = append(out, display.ClusterOption{
+			ID:       client.id + "/" + key,
+			SourceID: client.id,
+			Key:      key,
+			Value:    value,
+		})
+	}
+	return out
+}
+
+func certificateDisplay(client *Client, host *display.Host, cert nodeCertificate, now time.Time) display.Certificate {
+	remaining := 0
+	if cert.NotAfter > 0 {
+		remaining = int(math.Floor(time.Unix(cert.NotAfter, 0).Sub(now).Hours() / 24))
+	}
+	health := display.HealthOK
+	if cert.NotAfter > 0 {
+		if cert.NotAfter <= now.Unix() {
+			health = display.HealthCritical
+		} else if remaining <= 30 {
+			health = display.HealthWarning
+		}
+	}
+	filename := firstNonEmpty(cert.Filename, cert.Fingerprint, "certificate")
+	return display.Certificate{
+		ID:            client.id + "/" + host.Node + "/" + filename,
+		SourceID:      client.id,
+		HostID:        host.ID,
+		HostName:      host.Name,
+		Node:          host.Node,
+		Filename:      filename,
+		Subject:       cert.Subject,
+		Issuer:        cert.Issuer,
+		SANs:          cert.SANs,
+		Fingerprint:   cert.Fingerprint,
+		PublicKeyType: cert.PublicKeyType,
+		PublicKeyBits: cert.PublicKeyBits,
+		NotBefore:     cert.NotBefore,
+		NotAfter:      cert.NotAfter,
+		DaysRemaining: remaining,
+		Health:        health,
+	}
+}
+
+func applyStorageConfig(storage *display.Storage, cfg storageConfig) {
+	storage.PluginType = firstNonEmpty(storage.PluginType, cfg.Type)
+	storage.Content = firstNonEmpty(storage.Content, cfg.Content)
+	storage.Path = cfg.Path
+	storage.Pool = cfg.Pool
+	storage.Mountpoint = cfg.Mountpoint
+	if !storage.Shared {
+		storage.Shared = boolValue(cfg.Shared)
+	}
+}
+
+func storageContentQueryable(storage display.Storage) bool {
+	if storage.Name == "" {
+		return false
+	}
+	status := strings.ToLower(storage.Status)
+	if status != "" && status != "available" && status != "ok" {
+		return false
+	}
+	return storage.Content != ""
+}
+
+func storageItemDisplay(client *Client, storage display.Storage, item storageContent) display.StorageItem {
+	vmid := stringValue(item.VMID)
+	verification := verificationState(item)
+	health := display.HealthOK
+	if strings.EqualFold(verification, "failed") || strings.EqualFold(verification, "error") {
+		health = display.HealthWarning
+	}
+	return display.StorageItem{
+		ID:                client.id + "/" + storage.Node + "/" + item.VolID,
+		SourceID:          client.id,
+		HostID:            storage.HostID,
+		HostName:          storage.HostName,
+		Node:              storage.Node,
+		Storage:           storage.Name,
+		Content:           item.Content,
+		VolID:             item.VolID,
+		VMID:              vmid,
+		Format:            item.Format,
+		SizeBytes:         item.Size,
+		CreatedAt:         item.CTime,
+		Notes:             item.Notes,
+		Protected:         item.Protected != 0,
+		VerificationState: verification,
+		Health:            health,
+	}
+}
+
+func applyStorageItemSummary(storage *display.Storage, item display.StorageItem) {
+	storage.ContentItems++
+	switch item.Content {
+	case "backup":
+		storage.BackupCount++
+	case "iso":
+		storage.ISOCount++
+	case "vztmpl":
+		storage.TemplateCount++
+	case "images":
+		storage.ImageCount++
+	case "rootdir":
+		storage.RootdirCount++
+	}
+}
+
+func verificationState(item storageContent) string {
+	if item.Verification != nil {
+		if state := stringValue(item.Verification["state"]); state != "" {
+			return state
+		}
+	}
+	if item.Verified > 0 {
+		return "verified"
+	}
+	return ""
+}
+
 func networkDisplay(client *Client, host *display.Host, network networkInterface) display.Network {
 	health := display.HealthOK
 	if network.Active == 0 && network.Autostart != 0 {
@@ -1187,12 +1786,29 @@ func zfsPoolDisplay(client *Client, host *display.Host, pool zfsPool) display.ZF
 		Name:             name,
 		HealthText:       pool.Health,
 		Status:           pool.Status,
+		State:            pool.Health,
 		SizeBytes:        pool.Size,
 		AllocatedBytes:   pool.Alloc,
 		FreeBytes:        pool.Free,
 		FragmentationPct: pool.Frag,
-		DedupRatio:       pool.Dedup,
+		DedupRatio:       stringValue(pool.Dedup),
 		Health:           health,
+	}
+}
+
+func applyZFSPoolDetail(pool *display.ZFSPool, detail zfsPoolDetail) {
+	pool.State = firstNonEmpty(detail.State, pool.State)
+	pool.Status = firstNonEmpty(detail.Status, pool.Status)
+	pool.Scan = detail.Scan
+	pool.Errors = detail.Errors
+	devices, issues := zfsDeviceCounts(detail)
+	pool.DeviceCount = devices
+	pool.IssueCount = issues
+	if issues > 0 {
+		pool.Health = maxHealth(pool.Health, display.HealthWarning)
+	}
+	if pool.State != "" {
+		pool.Health = maxHealth(pool.Health, healthFromText(pool.State))
 	}
 }
 
@@ -1255,25 +1871,51 @@ func replicationDisplay(client *Client, replication replicationJob, guests map[s
 		}
 	}
 	health := display.HealthOK
-	if replication.Error != "" {
+	if replication.Error != "" || replication.FailCount > 0 {
+		health = display.HealthWarning
+	} else if text := strings.ToLower(firstNonEmpty(replication.Status, replication.State)); text != "" && text != "ok" {
 		health = display.HealthWarning
 	}
 	return display.Replication{
-		ID:         client.id + "/" + replication.ID,
-		SourceID:   client.id,
-		GuestID:    guestID,
-		GuestName:  guestName,
-		VMID:       vmid,
-		SourceNode: replication.Source,
-		TargetNode: replication.Target,
-		Schedule:   replication.Schedule,
-		Rate:       replication.Rate,
-		Enabled:    replication.Disable == 0,
-		LastSync:   replication.LastSync,
-		NextSync:   replication.NextSync,
-		Error:      replication.Error,
-		Health:     health,
+		ID:             client.id + "/" + replication.ID,
+		SourceID:       client.id,
+		GuestID:        guestID,
+		GuestName:      guestName,
+		VMID:           vmid,
+		SourceNode:     replication.Source,
+		TargetNode:     replication.Target,
+		Schedule:       replication.Schedule,
+		Rate:           replication.Rate,
+		Enabled:        replication.Disable == 0,
+		Status:         replication.Status,
+		State:          replication.State,
+		DurationSec:    replication.Duration,
+		FailCount:      replication.FailCount,
+		LastSync:       replication.LastSync,
+		NextSync:       replication.NextSync,
+		LastSyncStatus: replication.LastSyncStatus,
+		Error:          replication.Error,
+		Health:         health,
 	}
+}
+
+func applyReplicationStatus(replication *replicationJob, status replicationStatus) {
+	replication.Status = firstNonEmpty(status.Status, replication.Status)
+	replication.State = firstNonEmpty(status.State, replication.State)
+	if status.Duration > 0 {
+		replication.Duration = status.Duration
+	}
+	if status.FailCount > 0 {
+		replication.FailCount = status.FailCount
+	}
+	if status.LastSync > 0 {
+		replication.LastSync = status.LastSync
+	}
+	if status.NextSync > 0 {
+		replication.NextSync = status.NextSync
+	}
+	replication.LastSyncStatus = firstNonEmpty(status.LastSyncStatus, replication.LastSyncStatus)
+	replication.Error = firstNonEmpty(status.Error, replication.Error)
 }
 
 func updateDisplay(client *Client, host *display.Host, update aptUpdate) display.Update {
@@ -1509,6 +2151,62 @@ func applyGuestConfig(guest *display.Guest, cfg map[string]any) {
 	guest.NICs = guestNICs(cfg)
 }
 
+func applyGuestStatus(guest *display.Guest, status guestStatus) {
+	guest.Status = firstNonEmpty(status.Status, guest.Status)
+	if status.CPU > 0 {
+		guest.CPUPct = pctFloat(status.CPU)
+	}
+	if status.CPUs > 0 {
+		guest.MaxCPU = status.CPUs
+	}
+	if status.MaxMem > 0 {
+		guest.MemoryPct = pctInt64(status.Mem, status.MaxMem)
+		guest.MemoryUsedBytes = status.Mem
+		guest.MemoryTotalBytes = status.MaxMem
+	}
+	if status.MemHost > 0 {
+		guest.MemoryHostBytes = status.MemHost
+	}
+	if status.MaxSwap > 0 {
+		guest.SwapPct = pctInt64(status.Swap, status.MaxSwap)
+		guest.SwapUsedBytes = status.Swap
+		guest.SwapTotalBytes = status.MaxSwap
+	}
+	if status.MaxDisk > 0 {
+		guest.DiskPct = pctInt64(status.Disk, status.MaxDisk)
+		guest.DiskUsedBytes = status.Disk
+		guest.DiskTotalBytes = status.MaxDisk
+	}
+	if status.Uptime > 0 {
+		guest.UptimeSec = status.Uptime
+	}
+	if status.NetIn > 0 {
+		guest.NetInBytes = status.NetIn
+	}
+	if status.NetOut > 0 {
+		guest.NetOutBytes = status.NetOut
+	}
+	if status.DiskRead > 0 {
+		guest.DiskReadBytes = status.DiskRead
+	}
+	if status.DiskWrite > 0 {
+		guest.DiskWriteBytes = status.DiskWrite
+	}
+	if status.Tags != "" && guest.Tags == "" {
+		guest.Tags = status.Tags
+	}
+	guest.PID = status.PID
+	guest.QMPStatus = status.QMPStatus
+	guest.RunningQEMU = status.RunningQEMU
+	guest.HAManaged = status.HA.Managed != 0
+	guest.PressureCPUSomePct = pctAny(status.PressureCPUSome)
+	guest.PressureCPUFullPct = pctAny(status.PressureCPUFull)
+	guest.PressureIOSomePct = pctAny(status.PressureIOSome)
+	guest.PressureIOFullPct = pctAny(status.PressureIOFull)
+	guest.PressureMemorySomePct = pctAny(status.PressureMemorySome)
+	guest.PressureMemoryFullPct = pctAny(status.PressureMemoryFull)
+}
+
 func guestIPAddress(cfg map[string]any) string {
 	for _, key := range []string{"ipconfig0", "ipconfig1", "net0", "net1"} {
 		value := stringValue(cfg[key])
@@ -1523,6 +2221,11 @@ func guestIPAddress(cfg map[string]any) string {
 		}
 	}
 	return ""
+}
+
+func placeholderIPAddress(value string) bool {
+	text := strings.ToLower(strings.TrimSpace(value))
+	return text == "" || text == "dhcp" || strings.HasPrefix(text, "dhcp/")
 }
 
 func guestDisks(cfg map[string]any) []display.GuestDisk {
@@ -1731,6 +2434,168 @@ func agentFilesystems(info agentFSInfo) []display.GuestFilesystem {
 	return filesystems
 }
 
+func containerIPAddresses(interfaces []containerInterface) []string {
+	seen := map[string]bool{}
+	addresses := []string{}
+	add := func(address string) {
+		address = strings.TrimSpace(address)
+		if address == "" || strings.HasPrefix(address, "127.") || address == "::1" || strings.HasPrefix(address, "fe80:") {
+			return
+		}
+		if seen[address] {
+			return
+		}
+		seen[address] = true
+		addresses = append(addresses, address)
+	}
+	for _, iface := range interfaces {
+		if iface.Name == "lo" {
+			continue
+		}
+		for _, ip := range iface.IPAddresses {
+			if ip.IPAddress == "" {
+				continue
+			}
+			address := ip.IPAddress
+			if prefix := intValue(ip.Prefix); prefix > 0 {
+				address += "/" + strconv.Itoa(prefix)
+			}
+			add(address)
+			if len(addresses) >= maxGuestIPs {
+				return addresses
+			}
+		}
+		add(iface.Inet)
+		if len(addresses) >= maxGuestIPs {
+			return addresses
+		}
+		add(iface.Inet6)
+		if len(addresses) >= maxGuestIPs {
+			return addresses
+		}
+	}
+	return addresses
+}
+
+func nodeMetricTrends(client *Client, host *display.Host, points []rrdPoint) []display.MetricTrend {
+	base := metricTrendBase{
+		sourceID:     client.id,
+		hostID:       host.ID,
+		resourceType: "host",
+		resourceName: host.Name,
+		timeframe:    "hour",
+	}
+	return []display.MetricTrend{
+		trend(base, "cpu_pct", "%", points, func(p rrdPoint) int { return pctFloat(p.CPU) }),
+		trend(base, "memory_pct", "%", points, func(p rrdPoint) int {
+			used := firstPositiveFloat(p.MemUsed, p.Mem)
+			total := firstPositiveFloat(p.MemTotal, p.MaxMem)
+			return pctFloatRatio(used, total)
+		}),
+		trend(base, "root_pct", "%", points, func(p rrdPoint) int { return pctFloatRatio(p.RootUsed, p.RootTotal) }),
+		trend(base, "net_in_kib_s", "KiB/s", points, func(p rrdPoint) int { return kibRate(p.NetIn) }),
+		trend(base, "net_out_kib_s", "KiB/s", points, func(p rrdPoint) int { return kibRate(p.NetOut) }),
+		trend(base, "iowait_pct", "%", points, func(p rrdPoint) int { return pctFloat(p.IOWait) }),
+	}
+}
+
+func guestMetricTrends(client *Client, guest display.Guest, points []rrdPoint) []display.MetricTrend {
+	base := metricTrendBase{
+		sourceID:     client.id,
+		hostID:       guest.HostID,
+		guestID:      guest.ID,
+		resourceType: guest.Type,
+		resourceName: guest.Name,
+		timeframe:    "hour",
+	}
+	return []display.MetricTrend{
+		trend(base, "cpu_pct", "%", points, func(p rrdPoint) int { return pctFloat(p.CPU) }),
+		trend(base, "memory_pct", "%", points, func(p rrdPoint) int { return pctFloatRatio(p.Mem, p.MaxMem) }),
+		trend(base, "disk_pct", "%", points, func(p rrdPoint) int { return pctFloatRatio(p.Disk, p.MaxDisk) }),
+		trend(base, "net_in_kib_s", "KiB/s", points, func(p rrdPoint) int { return kibRate(p.NetIn) }),
+		trend(base, "net_out_kib_s", "KiB/s", points, func(p rrdPoint) int { return kibRate(p.NetOut) }),
+		trend(base, "disk_read_kib_s", "KiB/s", points, func(p rrdPoint) int { return kibRate(p.DiskRead) }),
+		trend(base, "disk_write_kib_s", "KiB/s", points, func(p rrdPoint) int { return kibRate(p.DiskWrite) }),
+	}
+}
+
+type metricTrendBase struct {
+	sourceID     string
+	hostID       string
+	guestID      string
+	resourceType string
+	resourceName string
+	timeframe    string
+}
+
+func trend(base metricTrendBase, metric string, unit string, points []rrdPoint, value func(rrdPoint) int) display.MetricTrend {
+	values := trendValues(points, value)
+	last := 0
+	if len(values) > 0 {
+		last = values[len(values)-1]
+	}
+	idParts := []string{base.sourceID, base.resourceType, base.resourceName, metric}
+	return display.MetricTrend{
+		ID:           strings.Join(idParts, "/"),
+		SourceID:     base.sourceID,
+		HostID:       base.hostID,
+		GuestID:      base.guestID,
+		ResourceType: base.resourceType,
+		ResourceName: base.resourceName,
+		Metric:       metric,
+		Unit:         unit,
+		Timeframe:    base.timeframe,
+		Last:         last,
+		Values:       values,
+	}
+}
+
+func trendValues(points []rrdPoint, value func(rrdPoint) int) []int {
+	if len(points) == 0 {
+		return []int{}
+	}
+	samples := maxTrendSamples
+	if len(points) < samples {
+		samples = len(points)
+	}
+	values := make([]int, 0, samples)
+	for i := 0; i < samples; i++ {
+		idx := 0
+		if samples > 1 {
+			idx = int(math.Round(float64(i) * float64(len(points)-1) / float64(samples-1)))
+		}
+		values = append(values, value(points[idx]))
+	}
+	return values
+}
+
+func zfsDeviceCounts(detail zfsPoolDetail) (int, int) {
+	devices := 0
+	issues := 0
+	var walk func(zfsPoolDetail)
+	walk = func(node zfsPoolDetail) {
+		if node.Leaf != 0 || len(node.Children) == 0 {
+			if node.Name != "" {
+				devices++
+			}
+			state := strings.ToUpper(strings.TrimSpace(node.State))
+			if state != "" && state != "ONLINE" && state != "AVAIL" {
+				issues++
+			}
+			if node.Read > 0 || node.Write > 0 || node.Checksum > 0 {
+				issues++
+			}
+		}
+		for _, child := range node.Children {
+			walk(child)
+		}
+	}
+	for _, child := range detail.Children {
+		walk(child)
+	}
+	return devices, issues
+}
+
 func healthFromText(value string) display.Health {
 	text := strings.ToLower(strings.TrimSpace(value))
 	switch {
@@ -1793,6 +2658,47 @@ func pctInt64(used, total int64) int {
 	return clampPct(int(math.Round(float64(used) / float64(total) * 100)))
 }
 
+func pctFloatRatio(used, total float64) int {
+	if used <= 0 || total <= 0 {
+		return 0
+	}
+	return clampPct(int(math.Round(used / total * 100)))
+}
+
+func pctAny(value any) int {
+	switch v := value.(type) {
+	case float64:
+		if v > 1 {
+			return clampPct(int(math.Round(v)))
+		}
+		return pctFloat(v)
+	case string:
+		parsed, _ := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		if parsed > 1 {
+			return clampPct(int(math.Round(parsed)))
+		}
+		return pctFloat(parsed)
+	default:
+		return pctFloatRatio(float64(int64Value(value)), 100)
+	}
+}
+
+func firstPositiveFloat(values ...float64) float64 {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func kibRate(value float64) int {
+	if value <= 0 {
+		return 0
+	}
+	return int(math.Round(value / 1024))
+}
+
 func clampPct(value int) int {
 	if value < 0 {
 		return 0
@@ -1817,6 +2723,60 @@ func displayName(sourceName, nodeName string) string {
 		return nodeName
 	}
 	return sourceName + " / " + nodeName
+}
+
+func compactValue(value any) string {
+	switch value.(type) {
+	case map[string]any, []any, []string:
+		data, err := json.Marshal(value)
+		if err == nil {
+			return string(data)
+		}
+	}
+	return stringValue(value)
+}
+
+func addCapability(state *display.State, sourceID string, hostID string, guestID string, name string, endpoint string, err error) {
+	if len(state.Capabilities) >= maxCapabilities {
+		return
+	}
+	status := "ok"
+	httpStatus := 200
+	message := ""
+	if err != nil {
+		status = "error"
+		httpStatus = 0
+		message = err.Error()
+		var apiErr *APIError
+		if errors.As(err, &apiErr) {
+			httpStatus = apiErr.StatusCode
+			switch apiErr.StatusCode {
+			case http.StatusForbidden, http.StatusUnauthorized:
+				status = "forbidden"
+			case http.StatusNotFound:
+				status = "not_found"
+			case http.StatusNotImplemented:
+				status = "not_available"
+			default:
+				if apiErr.StatusCode >= 500 {
+					status = "not_available"
+				}
+			}
+			message = fmt.Sprintf("HTTP %d", apiErr.StatusCode)
+		}
+	}
+	id := sourceID + "/" + name + "/" + strings.Trim(strings.ReplaceAll(endpoint, "/api2/json/", ""), "/")
+	state.Capabilities = append(state.Capabilities, display.Capability{
+		ID:         id,
+		SourceID:   sourceID,
+		HostID:     hostID,
+		GuestID:    guestID,
+		Name:       name,
+		Endpoint:   endpoint,
+		Status:     status,
+		HTTPStatus: httpStatus,
+		Message:    message,
+	})
 }
 
 func severityRank(h display.Health) int {
