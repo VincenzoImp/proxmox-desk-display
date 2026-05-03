@@ -9,6 +9,7 @@ The project turns a small ESP32-S3 display into an always-on appliance that show
 Early MVP scaffold. The repository contains:
 
 - a Go bridge that reads Proxmox APIs and exposes a compact display JSON API;
+- a bridge admin UI for adding/removing Proxmox sources, tokens, polling, and alert thresholds;
 - PlatformIO firmware for the LILYGO T-Display-S3;
 - Docker Compose examples and setup documentation;
 - mock mode for development without Proxmox.
@@ -38,32 +39,34 @@ The firmware never stores a Proxmox API token. It only knows the bridge URL and 
 
 ## Quick Start
 
-### 1. Create Proxmox API Tokens
+### 1. Start the Bridge
 
-Create one read-only token per Proxmox install. See [docs/proxmox-token.md](docs/proxmox-token.md).
-
-### 2. Configure the Bridge
-
-Copy the example files:
-
-```bash
-cp examples/config.example.yaml config.yaml
-cp examples/.env.example .env
-```
-
-Edit `config.yaml` and `.env`.
-
-Run the bridge:
+The public Docker image stores editable configuration in a persistent volume:
 
 ```bash
 docker compose -f examples/docker-compose.yaml up -d
 ```
 
+For local development before the Docker Hub image is published:
+
+```bash
+docker compose -f examples/docker-compose.local.yaml up -d --build
+```
+
 Open:
 
 ```text
-http://localhost:8765
+http://localhost:8765/admin
 ```
+
+On first setup the admin page is open. Set a display token, add one or more
+Proxmox sources, then save. After a display token exists, the admin page accepts
+HTTP basic auth with user `admin` and the admin token if configured, otherwise
+the display token.
+
+Create one read-only token per Proxmox install. See [docs/proxmox-token.md](docs/proxmox-token.md).
+See [docs/admin-ui.md](docs/admin-ui.md) for the admin UI details and
+[docs/docker-hub.md](docs/docker-hub.md) for publishing.
 
 For a demo without Proxmox:
 
@@ -108,7 +111,8 @@ GET /api/v1/display-state
 Authorization: Bearer <display_token>
 ```
 
-The response schema is versioned as `pve-desk-display.v1`. See [docs/api.md](docs/api.md).
+It also reads `/api/v1/detail-state` for bounded detail pages. The response
+schema is versioned as `pve-desk-display.v1`. See [docs/api.md](docs/api.md).
 
 ## License
 

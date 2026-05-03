@@ -12,7 +12,8 @@ import (
 	"time"
 
 	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/config"
-	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/proxmox"
+	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/configstore"
+	appruntime "github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/runtime"
 	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/server"
 	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/store"
 	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/version"
@@ -20,10 +21,12 @@ import (
 
 func main() {
 	var configPath string
+	var dataDir string
 	var mock bool
 	var showVersion bool
 
-	flag.StringVar(&configPath, "config", "config.yaml", "path to config.yaml")
+	flag.StringVar(&configPath, "config", "", "path to config.yaml; defaults to /data/config.yaml or ./config.yaml when present")
+	flag.StringVar(&dataDir, "data-dir", "/data", "persistent data directory for config and secrets")
 	flag.BoolVar(&mock, "mock", false, "serve deterministic mock data instead of reading Proxmox")
 	flag.BoolVar(&showVersion, "version", false, "print version and exit")
 	flag.Parse()
@@ -36,32 +39,31 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	slog.SetDefault(logger)
 
-	cfg, err := config.Load(configPath)
+	if configPath == "" {
+		if _, err := os.Stat("config.yaml"); err == nil {
+			configPath = "config.yaml"
+		}
+	}
+
+	cfgStore := configstore.New(dataDir, configPath)
+	cfg, secrets, err := cfgStore.Load()
 	if err != nil && !mock {
-		slog.Error("failed to load config", "path", configPath, "error", err)
+		slog.Error("failed to load config", "path", cfgStore.ConfigPath, "error", err)
 		os.Exit(1)
 	}
+
 	if mock {
 		cfg = config.MockConfig()
 	}
 
-	if err := cfg.Validate(mock); err != nil {
-		slog.Error("invalid config", "error", err)
-		os.Exit(1)
-	}
-
-	var collector store.Collector
-	if mock {
-		collector = store.NewMockCollector()
-	} else {
-		collector, err = proxmox.NewCollector(cfg)
-		if err != nil {
-			slog.Error("failed to create Proxmox collector", "error", err)
-			os.Exit(1)
-		}
+	collector, err := appruntime.CollectorForConfig(cfg, mock)
+	if err != nil {
+		slog.Warn("config is not ready; starting setup collector", "error", err)
+		collector = store.NewEmptyCollector()
 	}
 
 	cache := store.NewCache(collector, cfg.Server.PollInterval(), cfg.Server.StaleAfter())
+	admin := appruntime.NewManager(cfg, secrets, cfgStore, cache, mock)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -72,7 +74,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              cfg.Server.Addr(),
-		Handler:           server.New(cfg, cache, mock),
+		Handler:           server.New(cfg, cache, mock, admin),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 

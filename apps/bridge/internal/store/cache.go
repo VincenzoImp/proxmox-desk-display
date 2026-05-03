@@ -36,13 +36,16 @@ func NewCache(collector Collector, pollInterval time.Duration, staleAfter time.D
 
 func (c *Cache) Start(ctx context.Context) {
 	go func() {
-		ticker := time.NewTicker(c.pollInterval)
-		defer ticker.Stop()
 		for {
+			c.mu.RLock()
+			interval := c.pollInterval
+			c.mu.RUnlock()
+			timer := time.NewTimer(interval)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return
-			case <-ticker.C:
+			case <-timer.C:
 				if err := c.Refresh(ctx); err != nil {
 					slog.Warn("refresh failed", "error", err)
 				}
@@ -52,7 +55,11 @@ func (c *Cache) Start(ctx context.Context) {
 }
 
 func (c *Cache) Refresh(ctx context.Context) error {
-	state, err := c.collector.Collect(ctx)
+	c.mu.RLock()
+	collector := c.collector
+	c.mu.RUnlock()
+
+	state, err := collector.Collect(ctx)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if err != nil {
@@ -67,6 +74,14 @@ func (c *Cache) Refresh(ctx context.Context) error {
 	c.lastErr = nil
 	c.hasState = true
 	return nil
+}
+
+func (c *Cache) Reconfigure(collector Collector, pollInterval time.Duration, staleAfter time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.collector = collector
+	c.pollInterval = pollInterval
+	c.staleAfter = staleAfter
 }
 
 func (c *Cache) State() (display.State, error) {
@@ -104,6 +119,25 @@ type MockCollector struct{}
 
 func NewMockCollector() MockCollector {
 	return MockCollector{}
+}
+
+type EmptyCollector struct{}
+
+func NewEmptyCollector() EmptyCollector {
+	return EmptyCollector{}
+}
+
+func (EmptyCollector) Collect(context.Context) (display.State, error) {
+	state := display.NewState()
+	state.Alerts = []display.Alert{
+		{
+			ID:       "setup-required",
+			Severity: display.HealthWarning,
+			Title:    "Bridge setup required",
+			Message:  "Open the bridge admin page and add at least one Proxmox source.",
+		},
+	}
+	return display.Finalize(state), nil
 }
 
 func (MockCollector) Collect(context.Context) (display.State, error) {

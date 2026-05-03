@@ -8,6 +8,10 @@ The bridge is the data authority. It reads Proxmox APIs, applies auth/TLS/cache/
 
 The bridge is also where future data providers belong. Pulse, Prometheus, Uptime Kuma, Docker, or NAS integrations should normalize into the same display state instead of changing the firmware protocol.
 
+The bridge owns infrastructure configuration. Docker deployments use a writable
+`/data` volume where the admin UI persists non-secret config and local secrets.
+The firmware never stores Proxmox tokens.
+
 The bridge exposes three state views:
 
 - `/api/v1/display-state`: compact firmware-safe payload.

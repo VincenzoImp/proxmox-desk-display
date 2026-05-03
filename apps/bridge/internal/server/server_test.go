@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/config"
+	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/configstore"
 	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/display"
+	appruntime "github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/runtime"
 	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/store"
 )
 
@@ -19,7 +21,7 @@ func TestDisplayStateRequiresToken(t *testing.T) {
 	if err := cache.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	handler := New(cfg, cache, false)
+	handler := New(cfg, cache, false, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/display-state", nil)
 	res := httptest.NewRecorder()
@@ -44,7 +46,7 @@ func TestFullStateKeepsInventoryWhileDisplayStateIsCompact(t *testing.T) {
 	if err := cache.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	handler := New(cfg, cache, false)
+	handler := New(cfg, cache, false, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/display-state", nil)
 	req.Header.Set("Authorization", "Bearer secret")
@@ -89,6 +91,33 @@ func TestFullStateKeepsInventoryWhileDisplayStateIsCompact(t *testing.T) {
 	}
 	if len(detail.MetricTrends) != 1 || len(detail.StorageItems) != 1 {
 		t.Fatalf("detail-state missing bounded inventory: %#v", detail)
+	}
+}
+
+func TestAdminRequiresAdminTokenWhenConfigured(t *testing.T) {
+	cfg := config.NewDefault()
+	cfg.Server.DisplayTokenValue = "display"
+	cache := store.NewCache(store.NewEmptyCollector(), cfg.Server.PollInterval(), cfg.Server.StaleAfter())
+	if err := cache.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cfgStore := configstore.New(t.TempDir(), "")
+	manager := appruntime.NewManager(cfg, configstore.Secrets{DisplayToken: "display"}, cfgStore, cache, false)
+	handler := New(cfg, cache, false, manager)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin", nil)
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want unauthorized", res.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/admin", nil)
+	req.SetBasicAuth("admin", "display")
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("authenticated status = %d, want OK", res.Code)
 	}
 }
 

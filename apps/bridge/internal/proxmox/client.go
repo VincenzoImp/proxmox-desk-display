@@ -44,12 +44,19 @@ func NewClient(host config.ProxmoxHost) (*Client, error) {
 		id:      host.ID,
 		name:    host.Name,
 		baseURL: strings.TrimRight(host.BaseURL, "/"),
-		token:   config.NormalizeToken(os.Getenv(host.TokenEnv)),
+		token:   config.NormalizeToken(tokenForHost(host)),
 		http: &http.Client{
 			Timeout:   5 * time.Second,
 			Transport: transport,
 		},
 	}, nil
+}
+
+func tokenForHost(host config.ProxmoxHost) string {
+	if host.TokenValue != "" {
+		return host.TokenValue
+	}
+	return os.Getenv(host.TokenEnv)
 }
 
 func (c *Client) Get(ctx context.Context, path string, out any) error {

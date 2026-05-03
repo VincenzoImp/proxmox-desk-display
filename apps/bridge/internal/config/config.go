@@ -20,17 +20,21 @@ type Config struct {
 type ServerConfig struct {
 	Bind                string `yaml:"bind"`
 	Port                int    `yaml:"port"`
-	DisplayTokenEnv     string `yaml:"display_token_env"`
+	DisplayTokenEnv     string `yaml:"display_token_env,omitempty"`
+	DisplayTokenValue   string `yaml:"-"`
+	AdminTokenEnv       string `yaml:"admin_token_env,omitempty"`
+	AdminTokenValue     string `yaml:"-"`
 	PollIntervalSeconds int    `yaml:"poll_interval_seconds"`
 	StaleAfterSeconds   int    `yaml:"stale_after_seconds"`
 }
 
 type ProxmoxHost struct {
-	ID       string    `yaml:"id"`
-	Name     string    `yaml:"name"`
-	BaseURL  string    `yaml:"base_url"`
-	TokenEnv string    `yaml:"token_env"`
-	TLS      TLSConfig `yaml:"tls"`
+	ID         string    `yaml:"id"`
+	Name       string    `yaml:"name"`
+	BaseURL    string    `yaml:"base_url"`
+	TokenEnv   string    `yaml:"token_env,omitempty"`
+	TokenValue string    `yaml:"-"`
+	TLS        TLSConfig `yaml:"tls"`
 }
 
 type TLSConfig struct {
@@ -70,12 +74,23 @@ func Load(path string) (Config, error) {
 	return cfg, nil
 }
 
+func NewDefault() Config {
+	cfg := Config{}
+	cfg.applyDefaults()
+	return cfg
+}
+
+func (c *Config) ApplyDefaults() {
+	c.applyDefaults()
+}
+
 func MockConfig() Config {
 	cfg := Config{
 		Server: ServerConfig{
 			Bind:                "0.0.0.0",
 			Port:                8765,
 			DisplayTokenEnv:     "DISPLAY_TOKEN",
+			AdminTokenEnv:       "ADMIN_TOKEN",
 			PollIntervalSeconds: 10,
 			StaleAfterSeconds:   45,
 		},
@@ -98,6 +113,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Server.DisplayTokenEnv == "" {
 		c.Server.DisplayTokenEnv = "DISPLAY_TOKEN"
+	}
+	if c.Server.AdminTokenEnv == "" {
+		c.Server.AdminTokenEnv = "ADMIN_TOKEN"
 	}
 	if c.Server.PollIntervalSeconds == 0 {
 		c.Server.PollIntervalSeconds = 10
@@ -149,10 +167,10 @@ func (c Config) Validate(mock bool) error {
 		if pve.BaseURL == "" {
 			return fmt.Errorf("proxmox %q base_url is required", pve.ID)
 		}
-		if pve.TokenEnv == "" {
-			return fmt.Errorf("proxmox %q token_env is required", pve.ID)
+		if pve.TokenValue == "" && pve.TokenEnv == "" {
+			return fmt.Errorf("proxmox %q token is required", pve.ID)
 		}
-		if os.Getenv(pve.TokenEnv) == "" {
+		if pve.TokenValue == "" && os.Getenv(pve.TokenEnv) == "" {
 			return fmt.Errorf("proxmox %q token env %q is empty", pve.ID, pve.TokenEnv)
 		}
 		switch pve.TLS.Mode {
@@ -177,7 +195,20 @@ func (s ServerConfig) Addr() string {
 }
 
 func (s ServerConfig) DisplayToken() string {
+	if s.DisplayTokenValue != "" {
+		return s.DisplayTokenValue
+	}
 	return os.Getenv(s.DisplayTokenEnv)
+}
+
+func (s ServerConfig) AdminToken() string {
+	if s.AdminTokenValue != "" {
+		return s.AdminTokenValue
+	}
+	if token := os.Getenv(s.AdminTokenEnv); token != "" {
+		return token
+	}
+	return s.DisplayToken()
 }
 
 func (s ServerConfig) PollInterval() time.Duration {
