@@ -68,6 +68,8 @@ Host objects include node-level detail for the Host Detail screen:
   "cpu_pct": 3,
   "max_cpu": 4,
   "cpu_model": "Intel(R) Celeron(R) CPU N3450 @ 1.10GHz",
+  "gpu_count": 1,
+  "gpu_summary": "Intel UHD Graphics 500",
   "memory_pct": 27,
   "memory_used_bytes": 4435075072,
   "memory_total_bytes": 16609353728,

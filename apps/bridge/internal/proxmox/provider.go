@@ -167,6 +167,9 @@ func (c *Collector) collectSource(ctx context.Context, client *Client) (display.
 			host.PVEVersion = status.PVEVersion
 			host.KernelVersion = firstNonEmpty(status.KVersion, status.CurrentKernel.Release)
 		}
+		if devices, err := c.nodePCI(ctx, client, node); err == nil {
+			host.GPUCount, host.GPUSummary = summarizeGPUs(devices)
+		}
 	}
 
 	for _, r := range resources {
@@ -269,6 +272,12 @@ func (c *Collector) nodeStatus(ctx context.Context, client *Client, node string)
 	var status nodeStatus
 	err := client.Get(ctx, "/api2/json/nodes/"+url.PathEscape(node)+"/status", &status)
 	return status, err
+}
+
+func (c *Collector) nodePCI(ctx context.Context, client *Client, node string) ([]pciDevice, error) {
+	var devices []pciDevice
+	err := client.Get(ctx, "/api2/json/nodes/"+url.PathEscape(node)+"/hardware/pci", &devices)
+	return devices, err
 }
 
 func (c *Collector) applyHostAlerts(state *display.State, host *display.Host) {
@@ -395,6 +404,57 @@ type nodeStatus struct {
 		Release string `json:"release"`
 		Version string `json:"version"`
 	} `json:"current-kernel"`
+}
+
+type pciDevice struct {
+	ID                  string `json:"id"`
+	Class               string `json:"class"`
+	VendorName          string `json:"vendor_name"`
+	DeviceName          string `json:"device_name"`
+	SubsystemVendorName string `json:"subsystem_vendor_name"`
+	SubsystemDeviceName string `json:"subsystem_device_name"`
+}
+
+func summarizeGPUs(devices []pciDevice) (int, string) {
+	names := []string{}
+	for _, device := range devices {
+		if !isGPUClass(device.Class) {
+			continue
+		}
+		names = append(names, gpuName(device))
+	}
+	if len(names) == 0 {
+		return 0, ""
+	}
+	summary := names[0]
+	if len(names) > 1 {
+		summary += fmt.Sprintf(" +%d", len(names)-1)
+	}
+	return len(names), summary
+}
+
+func isGPUClass(class string) bool {
+	value := strings.ToLower(strings.TrimSpace(class))
+	value = strings.TrimPrefix(value, "0x")
+	return strings.HasPrefix(value, "03") ||
+		strings.Contains(value, "vga") ||
+		strings.Contains(value, "display") ||
+		strings.Contains(value, "3d controller")
+}
+
+func gpuName(device pciDevice) string {
+	vendor := strings.TrimSpace(firstNonEmpty(device.VendorName, device.SubsystemVendorName))
+	name := strings.TrimSpace(firstNonEmpty(device.DeviceName, device.SubsystemDeviceName, device.ID))
+	if vendor == "" {
+		return name
+	}
+	if name == "" {
+		return vendor
+	}
+	if strings.Contains(strings.ToLower(name), strings.ToLower(vendor)) {
+		return name
+	}
+	return vendor + " " + name
 }
 
 func pctFloat(value float64) int {

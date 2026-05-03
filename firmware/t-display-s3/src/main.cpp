@@ -17,11 +17,13 @@ constexpr uint8_t BTN_B = 14;  // LILYGO user button
 constexpr uint8_t BACKLIGHT_PIN = 38;
 constexpr unsigned long POLL_MS = 10000;
 constexpr unsigned long BUTTON_LONG_MS = 1200;
-constexpr uint8_t SCREEN_COUNT = 8;
-constexpr size_t MAX_HOSTS = 6;
-constexpr size_t MAX_STORAGES = 12;
-constexpr size_t MAX_GUESTS = 10;
-constexpr size_t MAX_ALERTS = 8;
+constexpr uint8_t SCREEN_COUNT = 9;
+constexpr size_t MAX_HOSTS = 12;
+constexpr size_t MAX_STORAGES = 24;
+constexpr size_t MAX_GUESTS = 24;
+constexpr size_t MAX_ALERTS = 12;
+constexpr size_t JSON_DOC_CAPACITY = 49152;
+constexpr int LIST_ROW_H = 14;
 
 TFT_eSPI tft;
 Preferences prefs;
@@ -53,6 +55,8 @@ struct Host {
   int cpu = 0;
   int maxCPU = 0;
   String cpuModel;
+  int gpuCount = 0;
+  String gpuSummary;
   int memory = 0;
   int64_t memoryUsed = 0;
   int64_t memoryTotal = 0;
@@ -151,6 +155,34 @@ uint16_t colorForHealth(const String &health) {
   return TFT_DARKGREY;
 }
 
+String labelForHealth(const String &health) {
+  if (health == "ok") return "OK";
+  if (health == "warning") return "WARN";
+  if (health == "critical") return "CRIT";
+  if (health == "stale") return "STALE";
+  return health.length() ? "UNK" : "";
+}
+
+uint16_t textColorForFill(uint16_t fill) {
+  if (fill == TFT_RED || fill == TFT_DARKGREY || fill == TFT_BLUE) return TFT_WHITE;
+  return TFT_BLACK;
+}
+
+String clipText(String value, size_t maxChars) {
+  value.trim();
+  if (maxChars == 0 || value.length() <= maxChars) return value;
+  if (maxChars <= 1) return value.substring(0, maxChars);
+  return value.substring(0, maxChars - 1) + ".";
+}
+
+size_t visibleWindowStart(size_t selected, size_t count, size_t visibleRows) {
+  if (count <= visibleRows || visibleRows == 0) return 0;
+  size_t half = visibleRows / 2;
+  if (selected <= half) return 0;
+  if (selected + (visibleRows - half) >= count) return count - visibleRows;
+  return selected - half;
+}
+
 String htmlEscape(String value) {
   value.replace("&", "&amp;");
   value.replace("<", "&lt;");
@@ -196,15 +228,25 @@ void setBacklight(uint8_t brightness) {
   analogWrite(BACKLIGHT_PIN, brightness);
 }
 
+void drawChip(const String &text, uint16_t fill, int right, int y) {
+  if (text.length() == 0) return;
+  int w = text.length() * 6 + 10;
+  int x = right - w;
+  tft.fillRect(x, y, w, 15, fill);
+  tft.setTextSize(1);
+  tft.setTextDatum(TR_DATUM);
+  tft.setTextColor(textColorForFill(fill), fill);
+  tft.drawString(text, right - 5, y + 4);
+  tft.setTextDatum(TL_DATUM);
+}
+
 void drawHeader(const String &title, const String &status) {
   tft.fillScreen(TFT_BLACK);
   tft.setTextDatum(TL_DATUM);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
   tft.drawString(title, 8, 6);
-  tft.setTextDatum(TR_DATUM);
-  tft.setTextColor(colorForHealth(status), TFT_BLACK);
-  tft.drawString(status, tft.width() - 8, 6);
+  drawChip(labelForHealth(status), colorForHealth(status), tft.width() - 8, 8);
   tft.drawFastHLine(8, 30, tft.width() - 16, TFT_DARKGREY);
   tft.setTextDatum(TL_DATUM);
 }
@@ -214,7 +256,13 @@ void drawFooter() {
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
   String sync = lastOK == 0 ? "never" : String((millis() - lastOK) / 1000) + "s ago";
   tft.drawString("sync " + sync, 8, tft.height() - 14);
+  if (state.summary.alerts > 0) {
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(colorForHealth(state.summary.health), TFT_BLACK);
+    tft.drawString("!" + String(state.summary.alerts), tft.width() / 2, tft.height() - 10);
+  }
   tft.setTextDatum(TR_DATUM);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
   tft.drawString(String(screenIndex + 1) + "/" + String(SCREEN_COUNT), tft.width() - 8, tft.height() - 14);
   tft.setTextDatum(TL_DATUM);
 }
@@ -346,7 +394,7 @@ bool connectWiFi() {
 }
 
 bool parseState(const String &payload) {
-  DynamicJsonDocument doc(24576);
+  DynamicJsonDocument doc(JSON_DOC_CAPACITY);
   DeserializationError err = deserializeJson(doc, payload);
   if (err) {
     lastError = "JSON parse: " + String(err.c_str());
@@ -373,6 +421,8 @@ bool parseState(const String &payload) {
     host.cpu = h["cpu_pct"] | 0;
     host.maxCPU = h["max_cpu"] | 0;
     host.cpuModel = h["cpu_model"] | "";
+    host.gpuCount = h["gpu_count"] | 0;
+    host.gpuSummary = h["gpu_summary"] | "";
     host.memory = h["memory_pct"] | 0;
     host.memoryUsed = h["memory_used_bytes"] | 0;
     host.memoryTotal = h["memory_total_bytes"] | 0;
@@ -490,45 +540,106 @@ void drawBar(int x, int y, int w, int h, int pct, uint16_t color) {
   tft.fillRect(x + 1, y + 1, fill, h - 2, color);
 }
 
+void drawMetricRow(const String &label, const String &value, int pct, uint16_t color, int y) {
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString(label, 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(value, 72, y);
+  drawBar(205, y, 85, 8, pct, color);
+}
+
+int drawWrappedField(const String &label, String value, int y, size_t maxLines) {
+  if (value.length() == 0) value = "-";
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString(label, 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  const size_t maxChars = 40;
+  for (size_t line = 0; line < maxLines; ++line) {
+    if (value.length() == 0) break;
+    String part = clipText(value, maxChars);
+    if (value.length() > maxChars && line + 1 < maxLines) {
+      part = value.substring(0, maxChars);
+      value = value.substring(maxChars);
+      value.trim();
+    } else {
+      value = "";
+    }
+    tft.drawString(part, 72, y + static_cast<int>(line) * 12);
+  }
+  return y + static_cast<int>(maxLines) * 12 + 4;
+}
+
 void drawOverview() {
   drawHeader("PROXMOX", state.summary.health);
   tft.setTextSize(1);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.drawString(String(state.summary.hostsOnline) + "/" + String(state.summary.hostsTotal) + " hosts", 10, 38);
-  tft.drawString(String(state.summary.guestsRunning) + " run  " + String(state.summary.guestsStopped) + " stop", 110, 38);
+  tft.drawString(String(state.summary.guestsRunning) + " run  " + String(state.summary.guestsStopped) + " stop", 108, 38);
   if (state.stale) {
     tft.setTextColor(TFT_YELLOW, TFT_BLACK);
     tft.drawString("STALE", 250, 38);
   }
 
-  int y = 58;
-  for (size_t i = 0; i < state.hostCount && i < 2; ++i) {
+  if (state.hostCount == 0) {
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString("No hosts in display state", 10, 62);
+    drawFooter();
+    return;
+  }
+
+  const size_t visibleRows = 4;
+  size_t start = visibleWindowStart(selectedHost, state.hostCount, visibleRows);
+  size_t end = start + visibleRows;
+  if (end > state.hostCount) end = state.hostCount;
+
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("B host " + String(static_cast<int>(start + 1)) + "-" + String(static_cast<int>(end)) + "/" +
+                     String(static_cast<int>(state.hostCount)),
+                 10, 52);
+
+  int y = 66;
+  for (size_t i = start; i < end; ++i) {
     Host &h = state.hosts[i];
-    tft.setTextColor(h.online ? TFT_WHITE : TFT_RED, TFT_BLACK);
-    tft.setTextSize(1);
-    tft.drawString(h.name.substring(0, 15), 10, y);
-    tft.setTextColor(colorForHealth(h.health), TFT_BLACK);
-    tft.drawString(h.online ? "online" : "offline", 230, y);
-    tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-    tft.drawString("CPU " + String(h.cpu) + "%", 10, y + 16);
-    drawBar(62, y + 16, 50, 8, h.cpu, TFT_CYAN);
-    tft.drawString("RAM " + String(h.memory) + "%", 124, y + 16);
-    drawBar(178, y + 16, 50, 8, h.memory, TFT_GREEN);
-    tft.drawString("STOR " + String(h.storage) + "%", 10, y + 30);
-    drawBar(72, y + 30, 50, 8, h.storage, colorForHealth(h.health));
-    tft.drawString(String(h.running) + " run", 138, y + 30);
-    y += 48;
+    uint16_t rowBg = i == selectedHost ? TFT_DARKGREY : TFT_BLACK;
+    if (i == selectedHost) tft.fillRect(6, y - 2, tft.width() - 12, 18, rowBg);
+    tft.fillRect(11, y + 3, 7, 7, colorForHealth(h.health));
+    tft.setTextColor(h.online ? TFT_WHITE : TFT_RED, rowBg);
+    tft.drawString(clipText(h.name, 16), 25, y);
+    tft.setTextColor(TFT_LIGHTGREY, rowBg);
+    tft.drawString("C" + String(h.cpu), 160, y);
+    tft.drawString("R" + String(h.memory), 204, y);
+    tft.drawString("S" + String(h.storage), 248, y);
+    tft.drawString(String(h.running) + "g", 286, y);
+    y += 20;
   }
   drawFooter();
 }
 
 void drawHosts() {
-  drawHeader("HOSTS", state.summary.health);
+  drawHeader("HOSTS", "");
   tft.setTextSize(1);
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  tft.drawString("B selects  CPU RAM STOR", 10, 38);
+  tft.drawString("B selects", 10, 38);
+  tft.drawString("C R D", 218, 38);
   int y = 52;
-  for (size_t i = 0; i < state.hostCount && y < tft.height() - 18; ++i) {
+  if (state.hostCount == 0) {
+    tft.drawString("No hosts in display state", 10, y);
+    drawFooter();
+    return;
+  }
+
+  size_t visibleRows = static_cast<size_t>((tft.height() - 18 - y) / LIST_ROW_H);
+  if (visibleRows == 0) visibleRows = 1;
+  size_t start = visibleWindowStart(selectedHost, state.hostCount, visibleRows);
+  size_t end = start + visibleRows;
+  if (end > state.hostCount) end = state.hostCount;
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(static_cast<int>(start + 1)) + "-" + String(static_cast<int>(end)) + "/" +
+                     String(static_cast<int>(state.hostCount)),
+                 tft.width() - 8, 38);
+  tft.setTextDatum(TL_DATUM);
+
+  for (size_t i = start; i < end && y < tft.height() - 18; ++i) {
     Host &h = state.hosts[i];
     uint16_t rowBg = i == selectedHost ? TFT_DARKGREY : TFT_BLACK;
     if (i == selectedHost) tft.fillRect(6, y - 1, tft.width() - 12, 13, rowBg);
@@ -548,9 +659,9 @@ void drawHosts() {
 }
 
 void drawHostDetail() {
-  drawHeader("HOST", state.summary.health);
   tft.setTextSize(1);
   if (state.hostCount == 0) {
+    drawHeader("HOST", "");
     tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
     tft.drawString("No host selected", 10, 42);
     drawFooter();
@@ -558,39 +669,34 @@ void drawHostDetail() {
   }
 
   Host &h = state.hosts[selectedHost];
+  drawHeader("HOST", h.health);
+  tft.setTextSize(1);
   tft.setTextColor(colorForHealth(h.health), TFT_BLACK);
   tft.drawString(h.online ? "ONLINE" : "OFFLINE", 10, 38);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   String title = h.name;
-  if (title.length() > 27) title = title.substring(0, 27);
+  if (title.length() > 22) title = title.substring(0, 22);
   tft.drawString(title, 86, 38);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(selectedHost + 1) + "/" + String(state.hostCount), tft.width() - 8, 38);
+  tft.setTextDatum(TL_DATUM);
 
   int y = 58;
-  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.drawString("CPU", 10, y);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString(String(h.cpu) + "% / " + String(h.maxCPU) + " cores", 92, y);
-  drawBar(205, y, 85, 8, h.cpu, TFT_CYAN);
+  drawMetricRow("CPU", String(h.cpu) + "% / " + String(h.maxCPU) + " cores", h.cpu, TFT_CYAN, y);
 
   y += 18;
-  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.drawString("RAM", 10, y);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString(formatBytes(h.memoryUsed) + " / " + formatBytes(h.memoryTotal), 92, y);
-  drawBar(205, y, 85, 8, h.memory, colorForHealth(h.health));
+  drawMetricRow("RAM", formatBytes(h.memoryUsed) + " / " + formatBytes(h.memoryTotal), h.memory,
+                colorForHealth(h.health), y);
 
   y += 18;
-  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.drawString("ROOT", 10, y);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString(formatBytes(h.storageUsed) + " / " + formatBytes(h.storageTotal), 92, y);
-  drawBar(205, y, 85, 8, h.storage, TFT_YELLOW);
+  drawMetricRow("ROOT", formatBytes(h.storageUsed) + " / " + formatBytes(h.storageTotal), h.storage, TFT_YELLOW, y);
 
   y += 18;
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.drawString("LOAD", 10, y);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString(h.load1.length() ? h.load1 : "-", 92, y);
+  tft.drawString(h.load1.length() ? h.load1 : "-", 72, y);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.drawString("UP", 160, y);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
@@ -600,35 +706,53 @@ void drawHostDetail() {
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.drawString("GUESTS", 10, y);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString(String(h.running) + " run  " + String(h.stopped) + " stop", 92, y);
+  tft.drawString(String(h.running) + " run  " + String(h.stopped) + " stop", 72, y);
 
   y += 18;
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.drawString("PVE", 10, y);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  String pve = h.pveVersion;
-  if (pve.length() > 30) pve = pve.substring(0, 30);
-  tft.drawString(pve.length() ? pve : "-", 92, y);
+  tft.drawString("A next: system", 10, y);
+  drawFooter();
+}
 
-  y += 18;
-  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.drawString("CPU ID", 10, y);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  String model = h.cpuModel;
-  if (model.length() > 31) model = model.substring(0, 31);
-  tft.drawString(model.length() ? model : "-", 92, y);
+void drawHostSystem() {
+  tft.setTextSize(1);
+  if (state.hostCount == 0) {
+    drawHeader("SYSTEM", "");
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString("No host selected", 10, 42);
+    drawFooter();
+    return;
+  }
 
+  Host &h = state.hosts[selectedHost];
+  drawHeader("SYSTEM", h.health);
+  tft.setTextSize(1);
+  tft.setTextColor(colorForHealth(h.health), TFT_BLACK);
+  tft.drawString(h.online ? "ONLINE" : "OFFLINE", 10, 38);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(clipText(h.name, 22), 86, 38);
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
   tft.setTextDatum(TR_DATUM);
-  tft.drawString(String(selectedHost + 1) + "/" + String(state.hostCount) + "  B next", tft.width() - 8, 54);
+  tft.drawString(String(selectedHost + 1) + "/" + String(state.hostCount), tft.width() - 8, 38);
   tft.setTextDatum(TL_DATUM);
+
+  int y = 56;
+  y = drawWrappedField("CPU", h.cpuModel, y, 2);
+  String gpu = h.gpuSummary;
+  if (h.gpuCount > 1 && gpu.indexOf("+") < 0) {
+    gpu += " +" + String(h.gpuCount - 1);
+  }
+  y = drawWrappedField("GPU", gpu, y, 2);
+  y = drawWrappedField("PVE", h.pveVersion, y, 1);
+  drawWrappedField("KERN", h.kernelVersion, y, 1);
+
   drawFooter();
 }
 
 void drawStorage() {
-  drawHeader("STORAGE", state.summary.health);
   tft.setTextSize(1);
   if (state.storageCount == 0) {
+    drawHeader("STORAGE", "");
     tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
     tft.drawString("No storage data", 10, 42);
     drawFooter();
@@ -636,12 +760,18 @@ void drawStorage() {
   }
 
   Storage &s = state.storages[selectedStorage];
+  drawHeader("STORAGE", s.health);
+  tft.setTextSize(1);
   tft.setTextColor(colorForHealth(s.health), TFT_BLACK);
   tft.drawString(s.status.length() ? s.status : "unknown", 10, 38);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   String title = s.name;
-  if (title.length() > 27) title = title.substring(0, 27);
+  if (title.length() > 22) title = title.substring(0, 22);
   tft.drawString(title, 86, 38);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(selectedStorage + 1) + "/" + String(state.storageCount), tft.width() - 8, 38);
+  tft.setTextDatum(TL_DATUM);
 
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
   String where = s.pluginType + "  " + s.hostName;
@@ -675,25 +805,35 @@ void drawStorage() {
   if (content.length() > 33) content = content.substring(0, 33);
   tft.drawString(content.length() ? content : "-", 92, y);
 
-  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  tft.setTextDatum(TR_DATUM);
-  tft.drawString(String(selectedStorage + 1) + "/" + String(state.storageCount) + "  B next", tft.width() - 8, 54);
-  tft.setTextDatum(TL_DATUM);
   drawFooter();
 }
 
 void drawGuests() {
-  drawHeader("GUESTS", state.summary.health);
+  drawHeader("GUESTS", "");
   tft.setTextSize(1);
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
   tft.drawString("B selects  A screen", 10, 38);
-  tft.drawString("CPU RAM DSK", 214, 38);
+  tft.drawString("C R D", 218, 38);
   int y = 52;
   if (state.guestCount == 0) {
     tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
     tft.drawString("No guests in display state", 10, y);
+    drawFooter();
+    return;
   }
-  for (size_t i = 0; i < state.guestCount && y < tft.height() - 18; ++i) {
+
+  size_t visibleRows = static_cast<size_t>((tft.height() - 18 - y) / LIST_ROW_H);
+  if (visibleRows == 0) visibleRows = 1;
+  size_t start = visibleWindowStart(selectedGuest, state.guestCount, visibleRows);
+  size_t end = start + visibleRows;
+  if (end > state.guestCount) end = state.guestCount;
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(static_cast<int>(start + 1)) + "-" + String(static_cast<int>(end)) + "/" +
+                     String(static_cast<int>(state.guestCount)),
+                 tft.width() - 8, 38);
+  tft.setTextDatum(TL_DATUM);
+
+  for (size_t i = start; i < end && y < tft.height() - 18; ++i) {
     Guest &g = state.guests[i];
     uint16_t rowBg = i == selectedGuest ? TFT_DARKGREY : TFT_BLACK;
     if (i == selectedGuest) tft.fillRect(6, y - 1, tft.width() - 12, 13, rowBg);
@@ -713,9 +853,9 @@ void drawGuests() {
 }
 
 void drawGuestDetail() {
-  drawHeader("DETAIL", state.summary.health);
   tft.setTextSize(1);
   if (state.guestCount == 0) {
+    drawHeader("DETAIL", "");
     tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
     tft.drawString("No guest selected", 10, 42);
     drawFooter();
@@ -723,12 +863,18 @@ void drawGuestDetail() {
   }
 
   Guest &g = state.guests[selectedGuest];
+  drawHeader("DETAIL", g.health);
+  tft.setTextSize(1);
   tft.setTextColor(colorForHealth(g.health), TFT_BLACK);
   tft.drawString(g.status == "running" ? "RUNNING" : g.status, 10, 38);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   String title = g.name;
-  if (title.length() > 27) title = title.substring(0, 27);
+  if (title.length() > 22) title = title.substring(0, 22);
   tft.drawString(title, 86, 38);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(selectedGuest + 1) + "/" + String(state.guestCount), tft.width() - 8, 38);
+  tft.setTextDatum(TL_DATUM);
 
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
   String where = g.type + "  " + g.hostName;
@@ -768,10 +914,6 @@ void drawGuestDetail() {
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString(formatBytes(g.netIn) + " in  " + formatBytes(g.netOut) + " out", 92, y);
 
-  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  tft.setTextDatum(TR_DATUM);
-  tft.drawString(String(selectedGuest + 1) + "/" + String(state.guestCount) + "  B next", tft.width() - 8, 54);
-  tft.setTextDatum(TL_DATUM);
   drawFooter();
 }
 
@@ -848,15 +990,18 @@ void render() {
       drawHostDetail();
       break;
     case 3:
-      drawStorage();
+      drawHostSystem();
       break;
     case 4:
-      drawGuests();
+      drawStorage();
       break;
     case 5:
-      drawGuestDetail();
+      drawGuests();
       break;
     case 6:
+      drawGuestDetail();
+      break;
+    case 7:
       drawAlerts();
       break;
     default:
@@ -924,15 +1069,15 @@ void manualRefresh() {
 }
 
 void buttonBShort() {
-  if (screenIndex == 1 || screenIndex == 2) {
+  if (screenIndex == 0 || screenIndex == 1 || screenIndex == 2 || screenIndex == 3) {
     nextHost();
     return;
   }
-  if (screenIndex == 3) {
+  if (screenIndex == 4) {
     nextStorage();
     return;
   }
-  if (screenIndex == 4 || screenIndex == 5) {
+  if (screenIndex == 5 || screenIndex == 6) {
     nextGuest();
     return;
   }

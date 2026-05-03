@@ -42,6 +42,8 @@ type Host struct {
 	CPUPct            int      `json:"cpu_pct"`
 	MaxCPU            int      `json:"max_cpu"`
 	CPUModel          string   `json:"cpu_model,omitempty"`
+	GPUCount          int      `json:"gpu_count,omitempty"`
+	GPUSummary        string   `json:"gpu_summary,omitempty"`
 	MemoryPct         int      `json:"memory_pct"`
 	MemoryUsedBytes   int64    `json:"memory_used_bytes"`
 	MemoryTotalBytes  int64    `json:"memory_total_bytes"`
