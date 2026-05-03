@@ -254,6 +254,27 @@ Task objects represent recent Proxmox node tasks, newest first. The bridge keeps
 }
 ```
 
+## Detail State
+
+```http
+GET /api/v1/detail-state
+Authorization: Bearer <display_token>
+```
+
+Returns bounded heavy details for firmware pages that need more than the base
+glance payload. This endpoint keeps the ESP32 from parsing the full inventory on
+every refresh.
+
+Included arrays are capped for display use:
+
+- `zfs_pools`: up to 24 ZFS pools with state, scan/errors, size, fragmentation, and device issue counts.
+- `storage_items`: up to 48 newest storage content entries such as images, backups, ISOs, and templates.
+- `metric_trends`: up to 64 one-hour RRD trends, each already downsampled by the bridge.
+- `certificates`: up to 24 node certificates with expiry health.
+- `ceph_clusters`: up to 8 Ceph summaries when Ceph is configured.
+- `capabilities`: up to 64 endpoint diagnostics, with blocked/unavailable endpoints sorted first.
+- `cluster_options`: up to 32 readable datacenter options for richer clients.
+
 ## Full State
 
 ```http
@@ -271,8 +292,9 @@ dashboards, debugging, and future firmware page-specific endpoints:
 - `ceph_clusters`: Ceph summary when Ceph is configured.
 - `capabilities`: endpoint diagnostics, including permission failures such as `apt/update` returning HTTP 403 with `PVEAuditor`.
 
-Firmware should continue to use `/api/v1/display-state` until it has a page
-model that requests only the details needed for the current screen.
+Firmware should use `/api/v1/display-state` for the core refresh and
+`/api/v1/detail-state` for bounded heavy detail pages. `/api/v1/full-state`
+is intended for dashboards and debugging.
 
 ## Debug
 

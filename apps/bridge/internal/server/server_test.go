@@ -75,6 +75,21 @@ func TestFullStateKeepsInventoryWhileDisplayStateIsCompact(t *testing.T) {
 	if len(full.MetricTrends) != 1 || len(full.StorageItems) != 1 {
 		t.Fatalf("full-state missing inventory: %#v", full)
 	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/detail-state", nil)
+	req.Header.Set("Authorization", "Bearer secret")
+	res = httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusOK {
+		t.Fatalf("detail-state status = %d", res.Code)
+	}
+	var detail display.DetailState
+	if err := json.Unmarshal(res.Body.Bytes(), &detail); err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.MetricTrends) != 1 || len(detail.StorageItems) != 1 {
+		t.Fatalf("detail-state missing bounded inventory: %#v", detail)
+	}
 }
 
 type inventoryCollector struct{}
@@ -83,5 +98,6 @@ func (inventoryCollector) Collect(context.Context) (display.State, error) {
 	state := display.NewState()
 	state.MetricTrends = []display.MetricTrend{{ID: "trend"}}
 	state.StorageItems = []display.StorageItem{{ID: "item"}}
+	state.Capabilities = []display.Capability{{ID: "cap", Status: "forbidden"}}
 	return state, nil
 }

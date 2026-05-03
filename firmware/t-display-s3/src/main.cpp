@@ -19,14 +19,22 @@ constexpr uint8_t BTN_B = 14;  // LILYGO user button
 constexpr uint8_t BACKLIGHT_PIN = 38;
 constexpr unsigned long POLL_MS = 10000;
 constexpr unsigned long BUTTON_LONG_MS = 1200;
-constexpr uint8_t SCREEN_COUNT = 13;
+constexpr uint8_t SCREEN_COUNT = 19;
 constexpr size_t MAX_HOSTS = 12;
 constexpr size_t MAX_STORAGES = 24;
 constexpr size_t MAX_DISKS = 24;
 constexpr size_t MAX_GUESTS = 24;
 constexpr size_t MAX_TASKS = 24;
 constexpr size_t MAX_ALERTS = 12;
+constexpr size_t MAX_ZFS_POOLS = 16;
+constexpr size_t MAX_STORAGE_ITEMS = 48;
+constexpr size_t MAX_TRENDS = 64;
+constexpr size_t MAX_TREND_VALUES = 24;
+constexpr size_t MAX_CERTIFICATES = 24;
+constexpr size_t MAX_CAPABILITIES = 48;
+constexpr size_t MAX_CEPH_CLUSTERS = 8;
 constexpr size_t JSON_DOC_CAPACITY = 81920;
+constexpr size_t DETAIL_JSON_DOC_CAPACITY = 65536;
 constexpr int LIST_ROW_H = 14;
 
 TFT_eSPI tft;
@@ -64,6 +72,12 @@ struct Host {
   int memory = 0;
   int64_t memoryUsed = 0;
   int64_t memoryTotal = 0;
+  int64_t memoryAvailable = 0;
+  int swap = 0;
+  int64_t swapUsed = 0;
+  int64_t swapTotal = 0;
+  int ioWait = 0;
+  int64_t ksmShared = 0;
   int storage = 0;
   int64_t storageUsed = 0;
   int64_t storageTotal = 0;
@@ -97,10 +111,19 @@ struct Storage {
   String status;
   String pluginType;
   String content;
+  String path;
+  String pool;
+  String mountpoint;
   bool shared = false;
   int disk = 0;
   int64_t diskUsed = 0;
   int64_t diskTotal = 0;
+  int contentItems = 0;
+  int backupCount = 0;
+  int isoCount = 0;
+  int templateCount = 0;
+  int imageCount = 0;
+  int rootdirCount = 0;
   String health = "unknown";
 };
 
@@ -129,6 +152,10 @@ struct Guest {
   int disk = 0;
   int64_t memoryUsed = 0;
   int64_t memoryTotal = 0;
+  int64_t memoryHost = 0;
+  int swap = 0;
+  int64_t swapUsed = 0;
+  int64_t swapTotal = 0;
   int64_t diskUsed = 0;
   int64_t diskTotal = 0;
   int64_t uptime = 0;
@@ -140,6 +167,15 @@ struct Guest {
   String osType;
   String ipAddress;
   bool agentEnabled = false;
+  bool agentAvailable = false;
+  String agentVersion;
+  int agentCommandCount = 0;
+  String qmpStatus;
+  String runningQemu;
+  bool haManaged = false;
+  int pressureCPU = 0;
+  int pressureIO = 0;
+  int pressureMemory = 0;
   bool onBoot = false;
   bool protection = false;
   bool isTemplate = false;
@@ -171,6 +207,77 @@ struct Alert {
   String message;
 };
 
+struct ZFSPool {
+  String name;
+  String hostName;
+  String status;
+  String state;
+  String scan;
+  String errors;
+  int64_t size = 0;
+  int64_t allocated = 0;
+  int64_t free = 0;
+  int fragmentation = 0;
+  int deviceCount = 0;
+  int issueCount = 0;
+  String health = "unknown";
+};
+
+struct StorageItem {
+  String storage;
+  String hostName;
+  String content;
+  String volid;
+  String vmid;
+  String format;
+  int64_t size = 0;
+  int64_t createdAt = 0;
+  bool protectedItem = false;
+  String verificationState;
+  String health = "unknown";
+};
+
+struct MetricTrend {
+  String resourceType;
+  String resourceName;
+  String metric;
+  String unit;
+  int last = 0;
+  int values[MAX_TREND_VALUES];
+  size_t valueCount = 0;
+};
+
+struct Certificate {
+  String filename;
+  String hostName;
+  String subject;
+  String issuer;
+  int daysRemaining = 0;
+  String health = "unknown";
+};
+
+struct Capability {
+  String sourceID;
+  String name;
+  String status;
+  int httpStatus = 0;
+  String message;
+};
+
+struct CephCluster {
+  String sourceID;
+  String healthText;
+  int64_t total = 0;
+  int64_t used = 0;
+  int64_t available = 0;
+  int usage = 0;
+  int osds = 0;
+  int osdsUp = 0;
+  int osdsIn = 0;
+  int pgs = 0;
+  String health = "unknown";
+};
+
 struct DisplayState {
   String schema;
   String generatedAt;
@@ -190,12 +297,33 @@ struct DisplayState {
   size_t alertCount = 0;
 };
 
+struct InventoryDetails {
+  String schema;
+  String generatedAt;
+  bool stale = true;
+  ZFSPool zfsPools[MAX_ZFS_POOLS];
+  size_t zfsPoolCount = 0;
+  StorageItem storageItems[MAX_STORAGE_ITEMS];
+  size_t storageItemCount = 0;
+  MetricTrend trends[MAX_TRENDS];
+  size_t trendCount = 0;
+  Certificate certificates[MAX_CERTIFICATES];
+  size_t certificateCount = 0;
+  Capability capabilities[MAX_CAPABILITIES];
+  size_t capabilityCount = 0;
+  CephCluster cephClusters[MAX_CEPH_CLUSTERS];
+  size_t cephClusterCount = 0;
+};
+
 DeviceConfig cfg;
 DisplayState state;
+InventoryDetails details;
 String lastError;
+String lastDetailError;
 String deviceIP;
 unsigned long lastPoll = 0;
 unsigned long lastOK = 0;
+unsigned long lastDetailOK = 0;
 uint8_t screenIndex = 0;
 size_t selectedHost = 0;
 size_t selectedStorage = 0;
@@ -203,6 +331,12 @@ size_t selectedDisk = 0;
 size_t selectedGuest = 0;
 size_t selectedTask = 0;
 size_t selectedAlert = 0;
+size_t selectedZFSPool = 0;
+size_t selectedStorageItem = 0;
+size_t selectedTrend = 0;
+size_t selectedCertificate = 0;
+size_t selectedCapability = 0;
+size_t selectedCephCluster = 0;
 
 struct ButtonState {
   bool previous = false;
@@ -308,6 +442,56 @@ String firstTag(const String &tags) {
   int split = tags.indexOf(";");
   if (split < 0) return tags;
   return tags.substring(0, split);
+}
+
+uint16_t colorForPercent(int pct) {
+  if (pct >= 90) return TFT_RED;
+  if (pct >= 75) return TFT_YELLOW;
+  return TFT_GREEN;
+}
+
+String metricLabel(String metric) {
+  metric.replace("_pct", "");
+  metric.replace("_kib_s", "");
+  metric.replace("_", " ");
+  metric.toUpperCase();
+  return metric;
+}
+
+String resourceLabel(const MetricTrend &trend) {
+  String label = trend.resourceType;
+  label.toUpperCase();
+  if (trend.resourceName.length() > 0) label += " " + trend.resourceName;
+  return label;
+}
+
+String capabilityHealth(const Capability &cap) {
+  if (cap.status == "ok") return "ok";
+  if (cap.status == "forbidden" || cap.status == "not_found" || cap.status == "not_available") return "warning";
+  return "critical";
+}
+
+String trendHealth(const MetricTrend &trend) {
+  if (!trend.metric.endsWith("_pct")) return "ok";
+  if (trend.last >= 90) return "critical";
+  if (trend.last >= 75) return "warning";
+  return "ok";
+}
+
+String detailSyncLabel() {
+  if (lastDetailOK == 0) return "never";
+  return String((millis() - lastDetailOK) / 1000) + "s ago";
+}
+
+int zfsUsedPct(const ZFSPool &pool) {
+  if (pool.size <= 0) return 0;
+  return constrain(static_cast<int>((pool.allocated * 100) / pool.size), 0, 100);
+}
+
+int cephUsedPct(const CephCluster &ceph) {
+  if (ceph.usage > 0) return ceph.usage;
+  if (ceph.total <= 0) return 0;
+  return constrain(static_cast<int>((ceph.used * 100) / ceph.total), 0, 100);
 }
 
 void setBacklight(uint8_t brightness) {
@@ -519,6 +703,12 @@ bool parseState(const String &payload) {
     host.memory = h["memory_pct"] | 0;
     host.memoryUsed = h["memory_used_bytes"] | 0;
     host.memoryTotal = h["memory_total_bytes"] | 0;
+    host.memoryAvailable = h["memory_available_bytes"] | 0;
+    host.swap = h["swap_pct"] | 0;
+    host.swapUsed = h["swap_used_bytes"] | 0;
+    host.swapTotal = h["swap_total_bytes"] | 0;
+    host.ioWait = h["iowait_pct"] | 0;
+    host.ksmShared = h["ksm_shared_bytes"] | 0;
     host.storage = h["storage_pct"] | 0;
     host.storageUsed = h["storage_used_bytes"] | 0;
     host.storageTotal = h["storage_total_bytes"] | 0;
@@ -572,10 +762,19 @@ bool parseState(const String &payload) {
     storage.status = s["status"] | "";
     storage.pluginType = s["plugin_type"] | "";
     storage.content = s["content"] | "";
+    storage.path = s["path"] | "";
+    storage.pool = s["pool"] | "";
+    storage.mountpoint = s["mountpoint"] | "";
     storage.shared = s["shared"] | false;
     storage.disk = s["disk_pct"] | 0;
     storage.diskUsed = s["disk_used_bytes"] | 0;
     storage.diskTotal = s["disk_total_bytes"] | 0;
+    storage.contentItems = s["content_items"] | 0;
+    storage.backupCount = s["backup_count"] | 0;
+    storage.isoCount = s["iso_count"] | 0;
+    storage.templateCount = s["template_count"] | 0;
+    storage.imageCount = s["image_count"] | 0;
+    storage.rootdirCount = s["rootdir_count"] | 0;
     storage.health = s["health"] | "unknown";
   }
 
@@ -620,6 +819,10 @@ bool parseState(const String &payload) {
     guest.disk = g["disk_pct"] | 0;
     guest.memoryUsed = g["memory_used_bytes"] | 0;
     guest.memoryTotal = g["memory_total_bytes"] | 0;
+    guest.memoryHost = g["memory_host_bytes"] | 0;
+    guest.swap = g["swap_pct"] | 0;
+    guest.swapUsed = g["swap_used_bytes"] | 0;
+    guest.swapTotal = g["swap_total_bytes"] | 0;
     guest.diskUsed = g["disk_used_bytes"] | 0;
     guest.diskTotal = g["disk_total_bytes"] | 0;
     guest.uptime = g["uptime_sec"] | 0;
@@ -631,6 +834,15 @@ bool parseState(const String &payload) {
     guest.osType = g["os_type"] | "";
     guest.ipAddress = g["ip_address"] | "";
     guest.agentEnabled = g["agent_enabled"] | false;
+    guest.agentAvailable = g["agent_available"] | false;
+    guest.agentVersion = g["agent_version"] | "";
+    guest.agentCommandCount = g["agent_command_count"] | 0;
+    guest.qmpStatus = g["qmp_status"] | "";
+    guest.runningQemu = g["running_qemu"] | "";
+    guest.haManaged = g["ha_managed"] | false;
+    guest.pressureCPU = max(g["pressure_cpu_some_pct"] | 0, g["pressure_cpu_full_pct"] | 0);
+    guest.pressureIO = max(g["pressure_io_some_pct"] | 0, g["pressure_io_full_pct"] | 0);
+    guest.pressureMemory = max(g["pressure_memory_some_pct"] | 0, g["pressure_memory_full_pct"] | 0);
     guest.onBoot = g["onboot"] | false;
     guest.protection = g["protection"] | false;
     guest.isTemplate = g["template"] | false;
@@ -691,39 +903,212 @@ bool parseState(const String &payload) {
   return true;
 }
 
-bool fetchState() {
+bool parseDetailState(const String &payload) {
+  DynamicJsonDocument doc(DETAIL_JSON_DOC_CAPACITY);
+  DeserializationError err = deserializeJson(doc, payload);
+  if (err) {
+    lastDetailError = "detail JSON: " + String(err.c_str());
+    Serial.printf("detail: parse failed: %s\n", err.c_str());
+    return false;
+  }
+
+  InventoryDetails next;
+  next.schema = doc["schema"] | "";
+  next.generatedAt = doc["generated_at"] | "";
+  next.stale = doc["stale"] | true;
+
+  for (JsonObject z : doc["zfs_pools"].as<JsonArray>()) {
+    if (next.zfsPoolCount >= MAX_ZFS_POOLS) break;
+    ZFSPool &pool = next.zfsPools[next.zfsPoolCount++];
+    pool.name = z["name"] | "";
+    pool.hostName = z["host_name"] | "";
+    pool.status = z["status"] | "";
+    pool.state = z["state"] | "";
+    pool.scan = z["scan"] | "";
+    pool.errors = z["errors"] | "";
+    pool.size = z["size_bytes"] | 0;
+    pool.allocated = z["allocated_bytes"] | 0;
+    pool.free = z["free_bytes"] | 0;
+    pool.fragmentation = z["fragmentation_pct"] | 0;
+    pool.deviceCount = z["device_count"] | 0;
+    pool.issueCount = z["issue_count"] | 0;
+    pool.health = z["health"] | "unknown";
+  }
+
+  for (JsonObject item : doc["storage_items"].as<JsonArray>()) {
+    if (next.storageItemCount >= MAX_STORAGE_ITEMS) break;
+    StorageItem &storageItem = next.storageItems[next.storageItemCount++];
+    storageItem.storage = item["storage"] | "";
+    storageItem.hostName = item["host_name"] | "";
+    storageItem.content = item["content"] | "";
+    storageItem.volid = item["volid"] | "";
+    storageItem.vmid = item["vmid"] | "";
+    storageItem.format = item["format"] | "";
+    storageItem.size = item["size_bytes"] | 0;
+    storageItem.createdAt = item["created_at"] | 0;
+    storageItem.protectedItem = item["protected"] | false;
+    storageItem.verificationState = item["verification_state"] | "";
+    storageItem.health = item["health"] | "unknown";
+  }
+
+  for (JsonObject trendJSON : doc["metric_trends"].as<JsonArray>()) {
+    if (next.trendCount >= MAX_TRENDS) break;
+    MetricTrend &trend = next.trends[next.trendCount++];
+    trend.resourceType = trendJSON["resource_type"] | "";
+    trend.resourceName = trendJSON["resource_name"] | "";
+    trend.metric = trendJSON["metric"] | "";
+    trend.unit = trendJSON["unit"] | "";
+    trend.last = trendJSON["last"] | 0;
+    JsonArray values = trendJSON["values"].as<JsonArray>();
+    for (JsonVariant value : values) {
+      if (trend.valueCount >= MAX_TREND_VALUES) break;
+      trend.values[trend.valueCount++] = value | 0;
+    }
+  }
+
+  for (JsonObject certJSON : doc["certificates"].as<JsonArray>()) {
+    if (next.certificateCount >= MAX_CERTIFICATES) break;
+    Certificate &cert = next.certificates[next.certificateCount++];
+    cert.filename = certJSON["filename"] | "";
+    cert.hostName = certJSON["host_name"] | "";
+    cert.subject = certJSON["subject"] | "";
+    cert.issuer = certJSON["issuer"] | "";
+    cert.daysRemaining = certJSON["days_remaining"] | 0;
+    cert.health = certJSON["health"] | "unknown";
+  }
+
+  for (JsonObject cephJSON : doc["ceph_clusters"].as<JsonArray>()) {
+    if (next.cephClusterCount >= MAX_CEPH_CLUSTERS) break;
+    CephCluster &ceph = next.cephClusters[next.cephClusterCount++];
+    ceph.sourceID = cephJSON["source_id"] | "";
+    ceph.healthText = cephJSON["health_text"] | "";
+    ceph.total = cephJSON["total_bytes"] | 0;
+    ceph.used = cephJSON["used_bytes"] | 0;
+    ceph.available = cephJSON["available_bytes"] | 0;
+    ceph.usage = cephJSON["usage_pct"] | 0;
+    ceph.osds = cephJSON["osds"] | 0;
+    ceph.osdsUp = cephJSON["osds_up"] | 0;
+    ceph.osdsIn = cephJSON["osds_in"] | 0;
+    ceph.pgs = cephJSON["pgs"] | 0;
+    ceph.health = cephJSON["health"] | "unknown";
+  }
+
+  for (JsonObject capJSON : doc["capabilities"].as<JsonArray>()) {
+    if (next.capabilityCount >= MAX_CAPABILITIES) break;
+    Capability &cap = next.capabilities[next.capabilityCount++];
+    cap.sourceID = capJSON["source_id"] | "";
+    cap.name = capJSON["name"] | "";
+    cap.status = capJSON["status"] | "";
+    cap.httpStatus = capJSON["http_status"] | 0;
+    cap.message = capJSON["message"] | "";
+  }
+
+  details = next;
+  if (selectedZFSPool >= details.zfsPoolCount) selectedZFSPool = details.zfsPoolCount == 0 ? 0 : details.zfsPoolCount - 1;
+  if (selectedStorageItem >= details.storageItemCount) {
+    selectedStorageItem = details.storageItemCount == 0 ? 0 : details.storageItemCount - 1;
+  }
+  if (selectedTrend >= details.trendCount) selectedTrend = details.trendCount == 0 ? 0 : details.trendCount - 1;
+  if (selectedCertificate >= details.certificateCount) {
+    selectedCertificate = details.certificateCount == 0 ? 0 : details.certificateCount - 1;
+  }
+  if (selectedCapability >= details.capabilityCount) {
+    selectedCapability = details.capabilityCount == 0 ? 0 : details.capabilityCount - 1;
+  }
+  if (selectedCephCluster >= details.cephClusterCount) {
+    selectedCephCluster = details.cephClusterCount == 0 ? 0 : details.cephClusterCount - 1;
+  }
+
+  lastDetailError = "";
+  lastDetailOK = millis();
+  Serial.printf("detail: zfs=%d content=%d trends=%d certs=%d ceph=%d caps=%d\n", details.zfsPoolCount,
+                details.storageItemCount, details.trendCount, details.certificateCount, details.cephClusterCount,
+                details.capabilityCount);
+  return true;
+}
+
+bool fetchBridgePayload(const String &path, String &payload, String &errorOut, const char *label) {
   if (WiFi.status() != WL_CONNECTED) {
-    lastError = "Wi-Fi disconnected";
-    Serial.println("bridge: skipped, Wi-Fi disconnected");
+    errorOut = "Wi-Fi disconnected";
+    Serial.printf("%s: skipped, Wi-Fi disconnected\n", label);
     return false;
   }
 
   HTTPClient http;
-  String url = trimTrailingSlash(cfg.bridgeURL) + "/api/v1/display-state";
+  String url = trimTrailingSlash(cfg.bridgeURL) + path;
   http.setTimeout(5000);
   if (!http.begin(url)) {
-    lastError = "bad bridge URL";
-    Serial.println("bridge: bad URL");
+    errorOut = "bad bridge URL";
+    Serial.printf("%s: bad URL\n", label);
     return false;
   }
   http.addHeader("Authorization", "Bearer " + cfg.displayToken);
   int code = http.GET();
   if (code != 200) {
-    lastError = "bridge HTTP " + String(code);
-    Serial.printf("bridge: HTTP %d\n", code);
+    errorOut = String(label) + " HTTP " + String(code);
+    Serial.printf("%s: HTTP %d\n", label, code);
     http.end();
     return false;
   }
-  String payload = http.getString();
-  Serial.printf("bridge: payload=%d bytes\n", payload.length());
+  payload = http.getString();
+  Serial.printf("%s: payload=%d bytes\n", label, payload.length());
   http.end();
-  return parseState(payload);
+  return true;
+}
+
+bool fetchDetailState() {
+  String payload;
+  String error;
+  if (!fetchBridgePayload("/api/v1/detail-state", payload, error, "detail")) {
+    lastDetailError = error;
+    return false;
+  }
+  return parseDetailState(payload);
+}
+
+bool fetchState() {
+  String payload;
+  String error;
+  if (!fetchBridgePayload("/api/v1/display-state", payload, error, "bridge")) {
+    lastError = error;
+    return false;
+  }
+  if (!parseState(payload)) {
+    return false;
+  }
+  fetchDetailState();
+  return true;
 }
 
 void drawBar(int x, int y, int w, int h, int pct, uint16_t color) {
   tft.drawRect(x, y, w, h, TFT_DARKGREY);
   int fill = map(constrain(pct, 0, 100), 0, 100, 0, w - 2);
   tft.fillRect(x + 1, y + 1, fill, h - 2, color);
+}
+
+void drawSparkline(int x, int y, int w, int h, const MetricTrend &trend) {
+  tft.drawRect(x, y, w, h, TFT_DARKGREY);
+  if (trend.valueCount == 0) {
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString("no samples", x + 6, y + h / 2 - 4);
+    return;
+  }
+
+  int maxValue = trend.metric.endsWith("_pct") ? 100 : 1;
+  for (size_t i = 0; i < trend.valueCount; ++i) {
+    if (trend.values[i] > maxValue) maxValue = trend.values[i];
+  }
+
+  int lastX = x + 2;
+  int lastY = y + h - 3 - map(constrain(trend.values[0], 0, maxValue), 0, maxValue, 0, h - 6);
+  size_t denominator = trend.valueCount > 1 ? trend.valueCount - 1 : 1;
+  for (size_t i = 1; i < trend.valueCount; ++i) {
+    int px = x + 2 + static_cast<int>((i * (w - 5)) / denominator);
+    int py = y + h - 3 - map(constrain(trend.values[i], 0, maxValue), 0, maxValue, 0, h - 6);
+    tft.drawLine(lastX, lastY, px, py, trend.metric.endsWith("_pct") ? colorForPercent(trend.last) : TFT_CYAN);
+    lastX = px;
+    lastY = py;
+  }
 }
 
 void drawMetricRow(const String &label, const String &value, int pct, uint16_t color, int y) {
@@ -910,9 +1295,15 @@ void drawHostDetail() {
 
   y += 18;
   drawMetricRow("RAM", formatBytes(h.memoryUsed) + " / " + formatBytes(h.memoryTotal), h.memory,
-                colorForHealth(h.health), y);
+                colorForPercent(h.memory), y);
 
   y += 18;
+  if (h.swapTotal > 0) {
+    drawMetricRow("SWAP", formatBytes(h.swapUsed) + " / " + formatBytes(h.swapTotal), h.swap,
+                  colorForPercent(h.swap), y);
+    y += 18;
+  }
+
   int pressure = storagePressureForHost(h);
   String pressureName = clipText(storagePressureNameForHost(h), 10);
   drawMetricRow("STOR", pressureName + " " + String(pressure) + "%", pressure, pressure >= 90 ? TFT_RED : TFT_YELLOW, y);
@@ -923,15 +1314,15 @@ void drawHostDetail() {
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString(h.loadAvg.length() ? h.loadAvg : "-", 72, y);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.drawString("UP", 160, y);
+  tft.drawString("IOW", 160, y);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString(formatUptime(h.uptime), 190, y);
+  tft.drawString(String(h.ioWait) + "%", 190, y);
 
   y += 18;
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.drawString("GUESTS", 10, y);
+  tft.drawString("UP", 10, y);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString(String(h.running) + " run  " + String(h.stopped) + " stop", 72, y);
+  tft.drawString(formatUptime(h.uptime) + "  " + String(h.running) + " run/" + String(h.stopped) + " stop", 72, y);
 
   drawFooter();
 }
@@ -1098,6 +1489,7 @@ void drawStorage() {
 
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
   String where = s.pluginType + "  " + s.hostName;
+  if (s.shared) where += "  shared";
   if (where.length() > 42) where = where.substring(0, 42);
   tft.drawString(where, 10, 54);
 
@@ -1116,18 +1508,141 @@ void drawStorage() {
 
   y += 20;
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.drawString("SHARED", 10, y);
+  tft.drawString("ITEMS", 10, y);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString(s.shared ? "yes" : "no", 92, y);
+  String items = String(s.contentItems);
+  if (s.imageCount > 0) items += " img " + String(s.imageCount);
+  if (s.backupCount > 0) items += " bak " + String(s.backupCount);
+  if (s.isoCount > 0) items += " iso " + String(s.isoCount);
+  if (s.templateCount > 0) items += " tpl " + String(s.templateCount);
+  tft.drawString(clipText(items, 33), 92, y);
 
   y += 20;
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
-  tft.drawString("CONTENT", 10, y);
+  tft.drawString("PATH", 10, y);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  String content = s.content;
-  if (content.length() > 33) content = content.substring(0, 33);
-  tft.drawString(content.length() ? content : "-", 92, y);
+  String path = s.pool.length() ? s.pool : s.mountpoint;
+  if (path.length() == 0) path = s.path;
+  if (path.length() == 0) path = s.content;
+  tft.drawString(path.length() ? clipText(path, 33) : "-", 92, y);
 
+  drawFooter();
+}
+
+void drawStorageContent() {
+  tft.setTextSize(1);
+  if (details.storageItemCount == 0) {
+    drawHeader("CONTENT", lastDetailError.length() ? "warning" : "");
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString(lastDetailError.length() ? clipText(lastDetailError, 40) : "No storage content detail", 10, 42);
+    drawFooter();
+    return;
+  }
+
+  StorageItem &item = details.storageItems[selectedStorageItem];
+  drawHeader("CONTENT", item.health);
+  tft.setTextSize(1);
+  tft.setTextColor(colorForHealth(item.health), TFT_BLACK);
+  tft.drawString(item.content.length() ? clipText(item.content, 10) : "ITEM", 10, 38);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(clipText(item.storage, 22), 86, 38);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(selectedStorageItem + 1) + "/" + String(details.storageItemCount), tft.width() - 8, 38);
+  tft.setTextDatum(TL_DATUM);
+
+  int y = 56;
+  y = drawWrappedField("VOL", item.volid, y, 2);
+  y = drawWrappedField("HOST", item.hostName, y, 1);
+  y = drawWrappedField("SIZE", formatBytes(item.size) + "  " + item.format, y, 1);
+  String flags = item.vmid.length() ? "vmid " + item.vmid : "-";
+  if (item.protectedItem) flags += " protected";
+  y = drawWrappedField("FLAGS", flags, y, 1);
+  drawWrappedField("VERIFY", item.verificationState.length() ? item.verificationState : "-", y, 1);
+  drawFooter();
+}
+
+void drawZFSPools() {
+  tft.setTextSize(1);
+  if (details.zfsPoolCount == 0) {
+    drawHeader("ZFS", lastDetailError.length() ? "warning" : "");
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString(lastDetailError.length() ? clipText(lastDetailError, 40) : "No ZFS pool detail", 10, 42);
+    drawFooter();
+    return;
+  }
+
+  ZFSPool &pool = details.zfsPools[selectedZFSPool];
+  drawHeader("ZFS", pool.health);
+  tft.setTextSize(1);
+  tft.setTextColor(colorForHealth(pool.health), TFT_BLACK);
+  tft.drawString(pool.status.length() ? clipText(pool.status, 10) : "POOL", 10, 38);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(clipText(pool.name, 22), 86, 38);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(selectedZFSPool + 1) + "/" + String(details.zfsPoolCount), tft.width() - 8, 38);
+  tft.setTextDatum(TL_DATUM);
+  tft.drawString(clipText(pool.hostName, 42), 10, 54);
+
+  int used = zfsUsedPct(pool);
+  int y = 74;
+  drawMetricRow("USED", formatBytes(pool.allocated) + " / " + formatBytes(pool.size), used, colorForPercent(used), y);
+  y += 18;
+  drawMetricRow("FRAG", String(pool.fragmentation) + "%", pool.fragmentation, colorForPercent(pool.fragmentation), y);
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("DEV", 10, y);
+  tft.setTextColor(pool.issueCount > 0 ? TFT_RED : TFT_WHITE, TFT_BLACK);
+  tft.drawString(String(pool.deviceCount) + " dev  " + String(pool.issueCount) + " issue", 72, y);
+  y += 18;
+  y = drawWrappedField("SCAN", pool.scan, y, 1);
+  drawWrappedField("ERR", pool.errors, y, 1);
+  drawFooter();
+}
+
+void drawCeph() {
+  tft.setTextSize(1);
+  if (details.cephClusterCount == 0) {
+    drawHeader("CEPH", lastDetailError.length() ? "warning" : "");
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString(lastDetailError.length() ? clipText(lastDetailError, 40) : "No Ceph cluster detail", 10, 42);
+    drawFooter();
+    return;
+  }
+
+  CephCluster &ceph = details.cephClusters[selectedCephCluster];
+  drawHeader("CEPH", ceph.health);
+  tft.setTextSize(1);
+  tft.setTextColor(colorForHealth(ceph.health), TFT_BLACK);
+  tft.drawString(clipText(ceph.healthText.length() ? ceph.healthText : ceph.health, 10), 10, 38);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(clipText(ceph.sourceID, 22), 86, 38);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(selectedCephCluster + 1) + "/" + String(details.cephClusterCount), tft.width() - 8, 38);
+  tft.setTextDatum(TL_DATUM);
+
+  int used = cephUsedPct(ceph);
+  int y = 58;
+  drawMetricRow("USED", formatBytes(ceph.used) + " / " + formatBytes(ceph.total), used, colorForPercent(used), y);
+  y += 20;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("AVAIL", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(formatBytes(ceph.available), 92, y);
+  y += 20;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("OSD", 10, y);
+  tft.setTextColor(ceph.osdsUp == ceph.osds && ceph.osdsIn == ceph.osds ? TFT_WHITE : TFT_YELLOW, TFT_BLACK);
+  tft.drawString(String(ceph.osdsUp) + "/" + String(ceph.osds) + " up  " + String(ceph.osdsIn) + "/" +
+                     String(ceph.osds) + " in",
+                 92, y);
+  y += 20;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("PG", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(String(ceph.pgs), 92, y);
   drawFooter();
 }
 
@@ -1221,14 +1736,14 @@ void drawGuestDetail() {
   tft.drawString("RAM", 10, y);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString(formatBytes(g.memoryUsed) + " / " + formatBytes(g.memoryTotal), 92, y);
-  drawBar(205, y, 85, 8, g.memory, TFT_GREEN);
+  drawBar(205, y, 85, 8, g.memory, colorForPercent(g.memory));
 
   y += 18;
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.drawString("DISK", 10, y);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString(formatBytes(g.diskUsed) + " / " + formatBytes(g.diskTotal), 92, y);
-  drawBar(205, y, 85, 8, g.disk, TFT_YELLOW);
+  drawBar(205, y, 85, 8, g.disk, colorForPercent(g.disk));
 
   y += 18;
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
@@ -1269,19 +1784,71 @@ void drawGuestConfig() {
 
   int y = 56;
   y = drawWrappedField("VMID", g.type + " " + g.vmid + "  " + g.hostName, y, 1);
-  y = drawWrappedField("OS", g.osType, y, 1);
-  y = drawWrappedField("IP", g.ipAddress, y, 1);
+  y = drawWrappedField("OS/IP", g.osType + "  " + g.ipAddress, y, 1);
   String flags = String("boot ") + yesNo(g.onBoot) + "  prot " + yesNo(g.protection);
   if (g.isTemplate) flags += "  template";
   if (g.unprivileged) flags += "  unpriv";
   y = drawWrappedField("FLAGS", flags, y, 1);
-  y = drawWrappedField("AGENT", yesNo(g.agentEnabled), y, 1);
-  String expect = g.pinned ? (String("pin ") + g.expected) : "-";
-  y = drawWrappedField("EXPECT", expect, y, 1);
-  String tags = firstTag(g.tags);
-  if (g.configWarning.length() > 0) tags = g.configWarning;
-  drawWrappedField(g.configWarning.length() > 0 ? "DATA" : "TAG", tags, y, 1);
+  String agent = yesNo(g.agentEnabled);
+  if (g.agentAvailable) agent += " up";
+  else if (g.agentEnabled) agent += " down";
+  if (g.agentVersion.length() > 0) agent += " v" + g.agentVersion;
+  if (g.agentCommandCount > 0) agent += " cmd " + String(g.agentCommandCount);
+  y = drawWrappedField("AGENT", agent, y, 1);
+  String runtime = g.qmpStatus.length() ? "qmp " + g.qmpStatus : "";
+  if (g.runningQemu.length() > 0) runtime += " qemu " + g.runningQemu;
+  if (g.haManaged) runtime += " HA";
+  y = drawWrappedField("RUN", runtime.length() ? runtime : "-", y, 1);
+  String finalLine;
+  String finalLabel = "TAG";
+  if (g.pressureCPU > 0 || g.pressureIO > 0 || g.pressureMemory > 0) {
+    finalLabel = "PRESS";
+    finalLine = "cpu " + String(g.pressureCPU) + "% io " + String(g.pressureIO) + "% mem " + String(g.pressureMemory) + "%";
+  } else if (g.pinned) {
+    finalLabel = "EXPECT";
+    finalLine = g.expected;
+  } else if (g.configWarning.length() > 0) {
+    finalLabel = "DATA";
+    finalLine = g.configWarning;
+  } else {
+    finalLine = firstTag(g.tags);
+  }
+  drawWrappedField(finalLabel, finalLine, y, 1);
 
+  drawFooter();
+}
+
+void drawTrends() {
+  tft.setTextSize(1);
+  if (details.trendCount == 0) {
+    drawHeader("TREND", lastDetailError.length() ? "warning" : "");
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString(lastDetailError.length() ? clipText(lastDetailError, 40) : "No RRD trend detail", 10, 42);
+    drawFooter();
+    return;
+  }
+
+  MetricTrend &trend = details.trends[selectedTrend];
+  drawHeader("TREND", trendHealth(trend));
+  tft.setTextSize(1);
+  tft.setTextColor(colorForHealth(trendHealth(trend)), TFT_BLACK);
+  tft.drawString(metricLabel(trend.metric), 10, 38);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(clipText(resourceLabel(trend), 22), 86, 38);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(selectedTrend + 1) + "/" + String(details.trendCount), tft.width() - 8, 38);
+  tft.setTextDatum(TL_DATUM);
+
+  String last = String(trend.last);
+  if (trend.unit.length() > 0) last += " " + trend.unit;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("LAST", 10, 56);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(last, 72, 56);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("1 hour, " + String(trend.valueCount) + " samples", 10, 72);
+  drawSparkline(10, 88, tft.width() - 20, 50, trend);
   drawFooter();
 }
 
@@ -1316,6 +1883,71 @@ void drawTasks() {
   y = drawWrappedField("TIME", timing, y, 1);
   drawWrappedField("STATUS", task.status, y, 2);
 
+  drawFooter();
+}
+
+void drawCertificates() {
+  tft.setTextSize(1);
+  if (details.certificateCount == 0) {
+    drawHeader("CERTS", lastDetailError.length() ? "warning" : "");
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString(lastDetailError.length() ? clipText(lastDetailError, 40) : "No certificate detail", 10, 42);
+    drawFooter();
+    return;
+  }
+
+  Certificate &cert = details.certificates[selectedCertificate];
+  drawHeader("CERTS", cert.health);
+  tft.setTextSize(1);
+  tft.setTextColor(colorForHealth(cert.health), TFT_BLACK);
+  String days = cert.daysRemaining > 0 ? String(cert.daysRemaining) + "d" : "expired";
+  tft.drawString(days, 10, 38);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(clipText(cert.filename, 22), 86, 38);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(selectedCertificate + 1) + "/" + String(details.certificateCount), tft.width() - 8, 38);
+  tft.setTextDatum(TL_DATUM);
+
+  int y = 56;
+  y = drawWrappedField("HOST", cert.hostName, y, 1);
+  y = drawWrappedField("SUBJ", cert.subject, y, 2);
+  y = drawWrappedField("ISSUER", cert.issuer, y, 2);
+  drawWrappedField("LEFT", days, y, 1);
+  drawFooter();
+}
+
+void drawCapabilities() {
+  tft.setTextSize(1);
+  if (details.capabilityCount == 0) {
+    drawHeader("CAPS", lastDetailError.length() ? "warning" : "");
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString(lastDetailError.length() ? clipText(lastDetailError, 40) : "No endpoint diagnostics", 10, 42);
+    drawFooter();
+    return;
+  }
+
+  Capability &cap = details.capabilities[selectedCapability];
+  String health = capabilityHealth(cap);
+  drawHeader("CAPS", health);
+  tft.setTextSize(1);
+  tft.setTextColor(colorForHealth(health), TFT_BLACK);
+  tft.drawString(clipText(cap.status, 10), 10, 38);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(clipText(cap.name, 22), 86, 38);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(selectedCapability + 1) + "/" + String(details.capabilityCount), tft.width() - 8, 38);
+  tft.setTextDatum(TL_DATUM);
+
+  int y = 56;
+  y = drawWrappedField("SRC", cap.sourceID, y, 1);
+  String status = cap.status;
+  if (cap.httpStatus > 0) status += " HTTP " + String(cap.httpStatus);
+  y = drawWrappedField("STATE", status, y, 1);
+  y = drawWrappedField("MSG", cap.message, y, 2);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("detail sync " + detailSyncLabel(), 10, y);
   drawFooter();
 }
 
@@ -1392,6 +2024,11 @@ void drawDevice() {
   tft.drawString(lastError.length() == 0 ? "OK" : lastError.substring(0, 28), 90, y);
   y += 18;
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("Detail", 10, y);
+  tft.setTextColor(lastDetailError.length() == 0 ? TFT_GREEN : TFT_YELLOW, TFT_BLACK);
+  tft.drawString(lastDetailError.length() == 0 ? detailSyncLabel() : lastDetailError.substring(0, 28), 90, y);
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.drawString("FW", 10, y);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString(FW_VERSION, 90, y);
@@ -1422,18 +2059,36 @@ void render() {
       drawStorage();
       break;
     case 7:
-      drawGuests();
+      drawStorageContent();
       break;
     case 8:
-      drawGuestDetail();
+      drawZFSPools();
       break;
     case 9:
-      drawGuestConfig();
+      drawCeph();
       break;
     case 10:
-      drawTasks();
+      drawGuests();
       break;
     case 11:
+      drawGuestDetail();
+      break;
+    case 12:
+      drawGuestConfig();
+      break;
+    case 13:
+      drawTrends();
+      break;
+    case 14:
+      drawTasks();
+      break;
+    case 15:
+      drawCertificates();
+      break;
+    case 16:
+      drawCapabilities();
+      break;
+    case 17:
       drawAlerts();
       break;
     default:
@@ -1513,6 +2168,42 @@ void nextAlert() {
   render();
 }
 
+void nextZFSPool() {
+  if (details.zfsPoolCount == 0) return;
+  selectedZFSPool = (selectedZFSPool + 1) % details.zfsPoolCount;
+  render();
+}
+
+void nextStorageItem() {
+  if (details.storageItemCount == 0) return;
+  selectedStorageItem = (selectedStorageItem + 1) % details.storageItemCount;
+  render();
+}
+
+void nextTrend() {
+  if (details.trendCount == 0) return;
+  selectedTrend = (selectedTrend + 1) % details.trendCount;
+  render();
+}
+
+void nextCertificate() {
+  if (details.certificateCount == 0) return;
+  selectedCertificate = (selectedCertificate + 1) % details.certificateCount;
+  render();
+}
+
+void nextCapability() {
+  if (details.capabilityCount == 0) return;
+  selectedCapability = (selectedCapability + 1) % details.capabilityCount;
+  render();
+}
+
+void nextCephCluster() {
+  if (details.cephClusterCount == 0) return;
+  selectedCephCluster = (selectedCephCluster + 1) % details.cephClusterCount;
+  render();
+}
+
 void manualRefresh() {
   fetchState();
   render();
@@ -1531,15 +2222,39 @@ void buttonBShort() {
     nextStorage();
     return;
   }
-  if (screenIndex == 7 || screenIndex == 8 || screenIndex == 9) {
+  if (screenIndex == 7) {
+    nextStorageItem();
+    return;
+  }
+  if (screenIndex == 8) {
+    nextZFSPool();
+    return;
+  }
+  if (screenIndex == 9) {
+    nextCephCluster();
+    return;
+  }
+  if (screenIndex == 10 || screenIndex == 11 || screenIndex == 12) {
     nextGuest();
     return;
   }
-  if (screenIndex == 10) {
+  if (screenIndex == 13) {
+    nextTrend();
+    return;
+  }
+  if (screenIndex == 14) {
     nextTask();
     return;
   }
-  if (screenIndex == 11) {
+  if (screenIndex == 15) {
+    nextCertificate();
+    return;
+  }
+  if (screenIndex == 16) {
+    nextCapability();
+    return;
+  }
+  if (screenIndex == 17) {
     nextAlert();
     return;
   }

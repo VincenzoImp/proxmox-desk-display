@@ -1,6 +1,9 @@
 package display
 
-import "time"
+import (
+	"sort"
+	"time"
+)
 
 const Schema = "pve-desk-display.v1"
 
@@ -41,6 +44,29 @@ type State struct {
 	Repositories   []Repository    `json:"repositories"`
 	Subscriptions  []Subscription  `json:"subscriptions"`
 	Alerts         []Alert         `json:"alerts"`
+}
+
+const (
+	MaxDetailZFSPools       = 24
+	MaxDetailCertificates   = 24
+	MaxDetailStorageItems   = 48
+	MaxDetailMetricTrends   = 64
+	MaxDetailClusterOptions = 32
+	MaxDetailCephClusters   = 8
+	MaxDetailCapabilities   = 64
+)
+
+type DetailState struct {
+	Schema         string          `json:"schema"`
+	GeneratedAt    time.Time       `json:"generated_at"`
+	Stale          bool            `json:"stale"`
+	ZFSPools       []ZFSPool       `json:"zfs_pools"`
+	Certificates   []Certificate   `json:"certificates"`
+	StorageItems   []StorageItem   `json:"storage_items"`
+	MetricTrends   []MetricTrend   `json:"metric_trends"`
+	ClusterOptions []ClusterOption `json:"cluster_options"`
+	CephClusters   []CephCluster   `json:"ceph_clusters"`
+	Capabilities   []Capability    `json:"capabilities"`
 }
 
 type Summary struct {
@@ -663,4 +689,66 @@ func CompactForDisplay(s State) State {
 	s.CephClusters = []CephCluster{}
 	s.Capabilities = []Capability{}
 	return Finalize(s)
+}
+
+func DetailForDisplay(s State) DetailState {
+	return DetailState{
+		Schema:         s.Schema,
+		GeneratedAt:    s.GeneratedAt,
+		Stale:          s.Stale,
+		ZFSPools:       firstN(s.ZFSPools, MaxDetailZFSPools),
+		Certificates:   firstN(s.Certificates, MaxDetailCertificates),
+		StorageItems:   firstN(s.StorageItems, MaxDetailStorageItems),
+		MetricTrends:   firstN(s.MetricTrends, MaxDetailMetricTrends),
+		ClusterOptions: firstN(s.ClusterOptions, MaxDetailClusterOptions),
+		CephClusters:   firstN(s.CephClusters, MaxDetailCephClusters),
+		Capabilities:   prioritizedCapabilities(s.Capabilities, MaxDetailCapabilities),
+	}
+}
+
+func firstN[T any](values []T, max int) []T {
+	if values == nil {
+		return []T{}
+	}
+	if len(values) <= max {
+		return values
+	}
+	return values[:max]
+}
+
+func prioritizedCapabilities(values []Capability, max int) []Capability {
+	if values == nil {
+		return []Capability{}
+	}
+	caps := append([]Capability(nil), values...)
+	sort.SliceStable(caps, func(i, j int) bool {
+		left := capabilityRank(caps[i].Status)
+		right := capabilityRank(caps[j].Status)
+		if left != right {
+			return left > right
+		}
+		if caps[i].SourceID != caps[j].SourceID {
+			return caps[i].SourceID < caps[j].SourceID
+		}
+		if caps[i].Name != caps[j].Name {
+			return caps[i].Name < caps[j].Name
+		}
+		return caps[i].Endpoint < caps[j].Endpoint
+	})
+	return firstN(caps, max)
+}
+
+func capabilityRank(status string) int {
+	switch status {
+	case "error":
+		return 5
+	case "forbidden", "unauthorized":
+		return 4
+	case "not_available", "not_found":
+		return 3
+	case "ok":
+		return 1
+	default:
+		return 2
+	}
 }

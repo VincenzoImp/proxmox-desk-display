@@ -47,3 +47,30 @@ func TestCompactForDisplayDropsHeavyInventory(t *testing.T) {
 		t.Fatalf("compact state kept heavy inventory: %#v", got)
 	}
 }
+
+func TestDetailForDisplayKeepsBoundedInventory(t *testing.T) {
+	state := NewState()
+	state.ZFSPools = []ZFSPool{{ID: "zfs"}}
+	state.Certificates = []Certificate{{ID: "cert"}}
+	state.StorageItems = []StorageItem{{ID: "item"}}
+	state.MetricTrends = []MetricTrend{{ID: "trend"}}
+	state.ClusterOptions = []ClusterOption{{ID: "option"}}
+	state.CephClusters = []CephCluster{{ID: "ceph"}}
+	state.Capabilities = []Capability{
+		{ID: "ok", Name: "ok", Status: "ok"},
+		{ID: "blocked", Name: "blocked", Status: "forbidden"},
+	}
+
+	got := DetailForDisplay(state)
+	if len(got.ZFSPools) != 1 ||
+		len(got.Certificates) != 1 ||
+		len(got.StorageItems) != 1 ||
+		len(got.MetricTrends) != 1 ||
+		len(got.ClusterOptions) != 1 ||
+		len(got.CephClusters) != 1 {
+		t.Fatalf("detail state missing inventory: %#v", got)
+	}
+	if len(got.Capabilities) != 2 || got.Capabilities[0].ID != "blocked" {
+		t.Fatalf("capabilities were not prioritized: %#v", got.Capabilities)
+	}
+}

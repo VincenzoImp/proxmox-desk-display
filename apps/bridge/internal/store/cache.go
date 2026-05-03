@@ -224,6 +224,8 @@ func (MockCollector) Collect(context.Context) (display.State, error) {
 			DiskPct:        82,
 			DiskUsedBytes:  880468295680,
 			DiskTotalBytes: 1073741824000,
+			ContentItems:   1,
+			ImageCount:     1,
 			Health:         display.HealthWarning,
 		},
 	}
@@ -257,17 +259,23 @@ func (MockCollector) Collect(context.Context) (display.State, error) {
 	}
 	state.ZFSPools = []display.ZFSPool{
 		{
-			ID:             "mock/lab-b/datapool",
-			SourceID:       "mock",
-			HostID:         "mock/lab-b",
-			HostName:       "Lab B",
-			Node:           "lab-b",
-			Name:           "datapool",
-			HealthText:     "ONLINE",
-			SizeBytes:      1073741824000,
-			AllocatedBytes: 880468295680,
-			FreeBytes:      193273528320,
-			Health:         display.HealthOK,
+			ID:               "mock/lab-b/datapool",
+			SourceID:         "mock",
+			HostID:           "mock/lab-b",
+			HostName:         "Lab B",
+			Node:             "lab-b",
+			Name:             "datapool",
+			HealthText:       "ONLINE",
+			Status:           "ONLINE",
+			State:            "ONLINE",
+			Scan:             "scrub repaired 0B",
+			Errors:           "No known data errors",
+			DeviceCount:      4,
+			SizeBytes:        1073741824000,
+			AllocatedBytes:   880468295680,
+			FreeBytes:        193273528320,
+			FragmentationPct: 12,
+			Health:           display.HealthOK,
 		},
 	}
 	state.Disks = []display.Disk{
@@ -457,6 +465,84 @@ func (MockCollector) Collect(context.Context) (display.State, error) {
 			State:    "started",
 			Node:     "lab-b",
 			Health:   display.HealthOK,
+		},
+	}
+	state.Certificates = []display.Certificate{
+		{
+			ID:            "mock/lab-a/pveproxy-ssl.pem",
+			SourceID:      "mock",
+			HostID:        "mock/lab-a",
+			HostName:      "Lab A",
+			Node:          "lab-a",
+			Filename:      "pveproxy-ssl.pem",
+			Subject:       "CN=lab-a.local",
+			Issuer:        "CN=Mock Lab CA",
+			DaysRemaining: 120,
+			Health:        display.HealthOK,
+		},
+	}
+	state.StorageItems = []display.StorageItem{
+		{
+			ID:        "mock/lab-b/datapool/vm-101-disk-0",
+			SourceID:  "mock",
+			HostID:    "mock/lab-b",
+			HostName:  "Lab B",
+			Node:      "lab-b",
+			Storage:   "datapool",
+			Content:   "images",
+			VolID:     "datapool:vm-101-disk-0",
+			VMID:      "101",
+			Format:    "raw",
+			SizeBytes: 107374182400,
+			Health:    display.HealthOK,
+		},
+	}
+	state.MetricTrends = []display.MetricTrend{
+		{
+			ID:           "mock/host/Lab A/cpu_pct",
+			SourceID:     "mock",
+			HostID:       "mock/lab-a",
+			ResourceType: "host",
+			ResourceName: "Lab A",
+			Metric:       "cpu_pct",
+			Unit:         "%",
+			Timeframe:    "hour",
+			Last:         18,
+			Values:       []int{12, 14, 13, 15, 18, 16, 19, 18},
+		},
+		{
+			ID:           "mock/qemu/Docker/memory_pct",
+			SourceID:     "mock",
+			HostID:       "mock/lab-b",
+			GuestID:      "mock/101",
+			ResourceType: "qemu",
+			ResourceName: "Docker",
+			Metric:       "memory_pct",
+			Unit:         "%",
+			Timeframe:    "hour",
+			Last:         58,
+			Values:       []int{52, 54, 57, 58, 59, 58, 57, 58},
+		},
+	}
+	state.Capabilities = []display.Capability{
+		{
+			ID:         "mock/apt_updates/lab-a",
+			SourceID:   "mock",
+			HostID:     "mock/lab-a",
+			Name:       "apt_updates",
+			Endpoint:   "/api2/json/nodes/lab-a/apt/update",
+			Status:     "forbidden",
+			HTTPStatus: 403,
+			Message:    "HTTP 403",
+		},
+		{
+			ID:         "mock/node_rrd/lab-a",
+			SourceID:   "mock",
+			HostID:     "mock/lab-a",
+			Name:       "node_rrd",
+			Endpoint:   "/api2/json/nodes/lab-a/rrddata",
+			Status:     "ok",
+			HTTPStatus: 200,
 		},
 	}
 	state.Updates = []display.Update{

@@ -42,4 +42,4 @@ pio run -t upload --upload-port /dev/cu.usbmodem1101
 
 ## Design Rule
 
-Do not add Proxmox-specific code to the firmware. Add new data handling in the bridge and keep `/api/v1/display-state` stable.
+Do not add Proxmox-specific code to the firmware. Add new data handling in the bridge, keep `/api/v1/display-state` stable, and expose bounded heavy display data through `/api/v1/detail-state` instead of making the ESP32 parse `/api/v1/full-state`.
