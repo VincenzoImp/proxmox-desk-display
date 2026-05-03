@@ -7,6 +7,8 @@
 #include <WebServer.h>
 #include <WiFi.h>
 
+SET_LOOP_TASK_STACK_SIZE(32768);
+
 namespace {
 
 constexpr const char *FW_VERSION = "0.1.0-dev";
@@ -22,7 +24,7 @@ constexpr size_t MAX_HOSTS = 12;
 constexpr size_t MAX_STORAGES = 24;
 constexpr size_t MAX_GUESTS = 24;
 constexpr size_t MAX_ALERTS = 12;
-constexpr size_t JSON_DOC_CAPACITY = 49152;
+constexpr size_t JSON_DOC_CAPACITY = 32768;
 constexpr int LIST_ROW_H = 14;
 
 TFT_eSPI tft;
@@ -289,6 +291,7 @@ void loadConfig() {
   cfg.brightness = prefs.getUChar("bright", 220);
   prefs.end();
   cfg.configured = cfg.ssid.length() > 0 && cfg.bridgeURL.length() > 0 && cfg.displayToken.length() > 0;
+  Serial.printf("config: configured=%d ssid=%s bridge=%s\n", cfg.configured, cfg.ssid.c_str(), cfg.bridgeURL.c_str());
 }
 
 void saveConfig() {
@@ -333,6 +336,7 @@ String setupPage() {
 }
 
 void startConfigPortal() {
+  Serial.println("setup portal: starting");
   drawBoot("setup Wi-Fi: " + String(AP_NAME));
   WiFi.mode(WIFI_AP);
   IPAddress apIP(192, 168, 4, 1);
@@ -377,6 +381,7 @@ void startConfigPortal() {
 }
 
 bool connectWiFi() {
+  Serial.printf("wifi: connecting to %s\n", cfg.ssid.c_str());
   WiFi.mode(WIFI_STA);
   WiFi.begin(cfg.ssid.c_str(), cfg.password.c_str());
   drawBoot("connecting Wi-Fi");
@@ -387,9 +392,11 @@ bool connectWiFi() {
   }
   if (WiFi.status() != WL_CONNECTED) {
     lastError = "Wi-Fi connection failed";
+    Serial.printf("wifi: failed status=%d\n", WiFi.status());
     return false;
   }
   deviceIP = WiFi.localIP().toString();
+  Serial.printf("wifi: connected ip=%s rssi=%d\n", deviceIP.c_str(), WiFi.RSSI());
   return true;
 }
 
@@ -398,6 +405,7 @@ bool parseState(const String &payload) {
   DeserializationError err = deserializeJson(doc, payload);
   if (err) {
     lastError = "JSON parse: " + String(err.c_str());
+    Serial.printf("json: parse failed: %s\n", err.c_str());
     return false;
   }
 
@@ -506,12 +514,15 @@ bool parseState(const String &payload) {
 
   lastError = "";
   lastOK = millis();
+  Serial.printf("json: hosts=%d storages=%d guests=%d alerts=%d\n", state.hostCount, state.storageCount, state.guestCount,
+                state.alertCount);
   return true;
 }
 
 bool fetchState() {
   if (WiFi.status() != WL_CONNECTED) {
     lastError = "Wi-Fi disconnected";
+    Serial.println("bridge: skipped, Wi-Fi disconnected");
     return false;
   }
 
@@ -520,16 +531,19 @@ bool fetchState() {
   http.setTimeout(5000);
   if (!http.begin(url)) {
     lastError = "bad bridge URL";
+    Serial.println("bridge: bad URL");
     return false;
   }
   http.addHeader("Authorization", "Bearer " + cfg.displayToken);
   int code = http.GET();
   if (code != 200) {
     lastError = "bridge HTTP " + String(code);
+    Serial.printf("bridge: HTTP %d\n", code);
     http.end();
     return false;
   }
   String payload = http.getString();
+  Serial.printf("bridge: payload=%d bytes\n", payload.length());
   http.end();
   return parseState(payload);
 }
