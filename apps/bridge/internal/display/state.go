@@ -19,6 +19,7 @@ type State struct {
 	Stale       bool      `json:"stale"`
 	Summary     Summary   `json:"summary"`
 	Hosts       []Host    `json:"hosts"`
+	Storages    []Storage `json:"storages"`
 	Guests      []Guest   `json:"guests"`
 	Alerts      []Alert   `json:"alerts"`
 }
@@ -33,19 +34,45 @@ type Summary struct {
 }
 
 type Host struct {
-	ID            string  `json:"id"`
-	Name          string  `json:"name"`
-	SourceID      string  `json:"source_id"`
-	Node          string  `json:"node"`
-	Online        bool    `json:"online"`
-	CPUPct        int     `json:"cpu_pct"`
-	MemoryPct     int     `json:"memory_pct"`
-	StoragePct    int     `json:"storage_pct"`
-	UptimeSec     int64   `json:"uptime_sec"`
-	GuestsRunning int     `json:"guests_running"`
-	GuestsStopped int     `json:"guests_stopped"`
-	Health        Health  `json:"health"`
-	Error         *string `json:"error"`
+	ID                string   `json:"id"`
+	Name              string   `json:"name"`
+	SourceID          string   `json:"source_id"`
+	Node              string   `json:"node"`
+	Online            bool     `json:"online"`
+	CPUPct            int      `json:"cpu_pct"`
+	MaxCPU            int      `json:"max_cpu"`
+	CPUModel          string   `json:"cpu_model,omitempty"`
+	MemoryPct         int      `json:"memory_pct"`
+	MemoryUsedBytes   int64    `json:"memory_used_bytes"`
+	MemoryTotalBytes  int64    `json:"memory_total_bytes"`
+	StoragePct        int      `json:"storage_pct"`
+	StorageUsedBytes  int64    `json:"storage_used_bytes"`
+	StorageTotalBytes int64    `json:"storage_total_bytes"`
+	UptimeSec         int64    `json:"uptime_sec"`
+	LoadAvg           []string `json:"load_avg,omitempty"`
+	PVEVersion        string   `json:"pve_version,omitempty"`
+	KernelVersion     string   `json:"kernel_version,omitempty"`
+	GuestsRunning     int      `json:"guests_running"`
+	GuestsStopped     int      `json:"guests_stopped"`
+	Health            Health   `json:"health"`
+	Error             *string  `json:"error"`
+}
+
+type Storage struct {
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	SourceID       string `json:"source_id"`
+	HostID         string `json:"host_id"`
+	HostName       string `json:"host_name"`
+	Node           string `json:"node"`
+	Status         string `json:"status"`
+	PluginType     string `json:"plugin_type"`
+	Content        string `json:"content"`
+	Shared         bool   `json:"shared"`
+	DiskPct        int    `json:"disk_pct"`
+	DiskUsedBytes  int64  `json:"disk_used_bytes"`
+	DiskTotalBytes int64  `json:"disk_total_bytes"`
+	Health         Health `json:"health"`
 }
 
 type Guest struct {
@@ -100,6 +127,9 @@ func Finalize(s State) State {
 	s.Schema = Schema
 	if s.Hosts == nil {
 		s.Hosts = []Host{}
+	}
+	if s.Storages == nil {
+		s.Storages = []Storage{}
 	}
 	if s.Guests == nil {
 		s.Guests = []Guest{}

@@ -60,6 +60,7 @@ func (c *Collector) Collect(ctx context.Context) (display.State, error) {
 
 	for res := range results {
 		state.Hosts = append(state.Hosts, res.state.Hosts...)
+		state.Storages = append(state.Storages, res.state.Storages...)
 		state.Guests = append(state.Guests, res.state.Guests...)
 		state.Alerts = append(state.Alerts, res.state.Alerts...)
 	}
@@ -71,6 +72,7 @@ func (c *Collector) Collect(ctx context.Context) (display.State, error) {
 		}
 		return state.Guests[i].ID < state.Guests[j].ID
 	})
+	sort.Slice(state.Storages, func(i, j int) bool { return state.Storages[i].ID < state.Storages[j].ID })
 	sort.Slice(state.Alerts, func(i, j int) bool {
 		return severityRank(state.Alerts[i].Severity) > severityRank(state.Alerts[j].Severity)
 	})
@@ -116,16 +118,21 @@ func (c *Collector) collectSource(ctx context.Context, client *Client) (display.
 		}
 		hostID := client.id + "/" + nodeName
 		host := display.Host{
-			ID:         hostID,
-			Name:       displayName(client.name, nodeName),
-			SourceID:   client.id,
-			Node:       nodeName,
-			Online:     r.Status == "online" || r.Status == "",
-			CPUPct:     pctFloat(r.CPU),
-			MemoryPct:  pctInt64(r.Mem, r.MaxMem),
-			StoragePct: pctInt64(r.Disk, r.MaxDisk),
-			UptimeSec:  r.Uptime,
-			Health:     display.HealthOK,
+			ID:                hostID,
+			Name:              displayName(client.name, nodeName),
+			SourceID:          client.id,
+			Node:              nodeName,
+			Online:            r.Status == "online" || r.Status == "",
+			CPUPct:            pctFloat(r.CPU),
+			MaxCPU:            r.MaxCPU,
+			MemoryPct:         pctInt64(r.Mem, r.MaxMem),
+			MemoryUsedBytes:   r.Mem,
+			MemoryTotalBytes:  r.MaxMem,
+			StoragePct:        pctInt64(r.Disk, r.MaxDisk),
+			StorageUsedBytes:  r.Disk,
+			StorageTotalBytes: r.MaxDisk,
+			UptimeSec:         r.Uptime,
+			Health:            display.HealthOK,
 		}
 		if !host.Online {
 			host.Health = display.HealthCritical
@@ -141,14 +148,52 @@ func (c *Collector) collectSource(ctx context.Context, client *Client) (display.
 			}
 			if status.Memory.Total > 0 {
 				host.MemoryPct = pctInt64(status.Memory.Used, status.Memory.Total)
+				host.MemoryUsedBytes = status.Memory.Used
+				host.MemoryTotalBytes = status.Memory.Total
 			}
 			if status.RootFS.Total > 0 {
 				host.StoragePct = pctInt64(status.RootFS.Used, status.RootFS.Total)
+				host.StorageUsedBytes = status.RootFS.Used
+				host.StorageTotalBytes = status.RootFS.Total
 			}
 			if status.Uptime > 0 {
 				host.UptimeSec = status.Uptime
 			}
+			if status.CPUInfo.CPUs > 0 {
+				host.MaxCPU = status.CPUInfo.CPUs
+			}
+			host.CPUModel = status.CPUInfo.Model
+			host.LoadAvg = status.LoadAvg
+			host.PVEVersion = status.PVEVersion
+			host.KernelVersion = firstNonEmpty(status.KVersion, status.CurrentKernel.Release)
 		}
+	}
+
+	for _, r := range resources {
+		if r.Type != "storage" {
+			continue
+		}
+		nodeName := firstNonEmpty(r.Node, "pve")
+		hostID := client.id + "/" + nodeName
+		storageName := firstNonEmpty(r.Storage, strings.TrimPrefix(r.ID, "storage/"+nodeName+"/"))
+		storage := display.Storage{
+			ID:             client.id + "/" + nodeName + "/" + storageName,
+			Name:           storageName,
+			SourceID:       client.id,
+			HostID:         hostID,
+			HostName:       displayName(client.name, nodeName),
+			Node:           nodeName,
+			Status:         firstNonEmpty(r.Status, "unknown"),
+			PluginType:     r.PluginType,
+			Content:        r.Content,
+			Shared:         r.Shared != 0,
+			DiskPct:        pctInt64(r.Disk, r.MaxDisk),
+			DiskUsedBytes:  r.Disk,
+			DiskTotalBytes: r.MaxDisk,
+			Health:         display.HealthOK,
+		}
+		c.applyStorageAlerts(&state, &storage)
+		state.Storages = append(state.Storages, storage)
 	}
 
 	for _, r := range resources {
@@ -256,6 +301,41 @@ func (c *Collector) applyHostAlerts(state *display.State, host *display.Host) {
 	}
 }
 
+func (c *Collector) applyStorageAlerts(state *display.State, storage *display.Storage) {
+	if storage.Status != "available" && storage.Status != "ok" && storage.Status != "" {
+		storage.Health = display.HealthWarning
+		state.Alerts = append(state.Alerts, display.Alert{
+			ID:       storage.ID + "/status",
+			SourceID: storage.SourceID,
+			HostID:   storage.HostID,
+			Severity: display.HealthWarning,
+			Title:    storage.HostName + " storage " + storage.Name,
+			Message:  "status is " + storage.Status,
+		})
+	}
+	if storage.DiskPct >= c.cfg.Alerts.StorageCriticalPct {
+		storage.Health = display.HealthCritical
+		state.Alerts = append(state.Alerts, display.Alert{
+			ID:       storage.ID + "/critical",
+			SourceID: storage.SourceID,
+			HostID:   storage.HostID,
+			Severity: display.HealthCritical,
+			Title:    storage.HostName + " " + storage.Name + " critical",
+			Message:  fmt.Sprintf("storage is %d%%", storage.DiskPct),
+		})
+	} else if storage.DiskPct >= c.cfg.Alerts.StorageWarningPct && storage.Health != display.HealthCritical {
+		storage.Health = display.HealthWarning
+		state.Alerts = append(state.Alerts, display.Alert{
+			ID:       storage.ID + "/warning",
+			SourceID: storage.SourceID,
+			HostID:   storage.HostID,
+			Severity: display.HealthWarning,
+			Title:    storage.HostName + " " + storage.Name + " warning",
+			Message:  fmt.Sprintf("storage is %d%%", storage.DiskPct),
+		})
+	}
+}
+
 func alertForHost(host display.Host, severity display.Health, title string, message string) display.Alert {
 	return display.Alert{
 		ID:       host.ID + "/" + strings.ReplaceAll(title, " ", "-"),
@@ -268,30 +348,37 @@ func alertForHost(host display.Host, severity display.Health, title string, mess
 }
 
 type resource struct {
-	ID        string  `json:"id"`
-	Type      string  `json:"type"`
-	Node      string  `json:"node"`
-	Name      string  `json:"name"`
-	Status    string  `json:"status"`
-	VMID      int     `json:"vmid"`
-	CPU       float64 `json:"cpu"`
-	MaxCPU    int     `json:"maxcpu"`
-	Mem       int64   `json:"mem"`
-	MaxMem    int64   `json:"maxmem"`
-	Disk      int64   `json:"disk"`
-	MaxDisk   int64   `json:"maxdisk"`
-	Uptime    int64   `json:"uptime"`
-	NetIn     int64   `json:"netin"`
-	NetOut    int64   `json:"netout"`
-	DiskRead  int64   `json:"diskread"`
-	DiskWrite int64   `json:"diskwrite"`
-	Tags      string  `json:"tags"`
+	ID         string  `json:"id"`
+	Type       string  `json:"type"`
+	Node       string  `json:"node"`
+	Name       string  `json:"name"`
+	Status     string  `json:"status"`
+	VMID       int     `json:"vmid"`
+	CPU        float64 `json:"cpu"`
+	MaxCPU     int     `json:"maxcpu"`
+	Mem        int64   `json:"mem"`
+	MaxMem     int64   `json:"maxmem"`
+	Disk       int64   `json:"disk"`
+	MaxDisk    int64   `json:"maxdisk"`
+	Uptime     int64   `json:"uptime"`
+	NetIn      int64   `json:"netin"`
+	NetOut     int64   `json:"netout"`
+	DiskRead   int64   `json:"diskread"`
+	DiskWrite  int64   `json:"diskwrite"`
+	Tags       string  `json:"tags"`
+	Storage    string  `json:"storage"`
+	PluginType string  `json:"plugintype"`
+	Content    string  `json:"content"`
+	Shared     int     `json:"shared"`
 }
 
 type nodeStatus struct {
-	CPU    *float64 `json:"cpu"`
-	Uptime int64    `json:"uptime"`
-	Memory struct {
+	CPU        *float64 `json:"cpu"`
+	Uptime     int64    `json:"uptime"`
+	LoadAvg    []string `json:"loadavg"`
+	PVEVersion string   `json:"pveversion"`
+	KVersion   string   `json:"kversion"`
+	Memory     struct {
 		Used  int64 `json:"used"`
 		Total int64 `json:"total"`
 	} `json:"memory"`
@@ -299,6 +386,15 @@ type nodeStatus struct {
 		Used  int64 `json:"used"`
 		Total int64 `json:"total"`
 	} `json:"rootfs"`
+	CPUInfo struct {
+		Model string `json:"model"`
+		CPUs  int    `json:"cpus"`
+		Cores int    `json:"cores"`
+	} `json:"cpuinfo"`
+	CurrentKernel struct {
+		Release string `json:"release"`
+		Version string `json:"version"`
+	} `json:"current-kernel"`
 }
 
 func pctFloat(value float64) int {

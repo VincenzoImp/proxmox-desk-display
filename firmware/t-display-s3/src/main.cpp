@@ -17,8 +17,9 @@ constexpr uint8_t BTN_B = 14;  // LILYGO user button
 constexpr uint8_t BACKLIGHT_PIN = 38;
 constexpr unsigned long POLL_MS = 10000;
 constexpr unsigned long BUTTON_LONG_MS = 1200;
-constexpr uint8_t SCREEN_COUNT = 5;
+constexpr uint8_t SCREEN_COUNT = 8;
 constexpr size_t MAX_HOSTS = 6;
+constexpr size_t MAX_STORAGES = 12;
 constexpr size_t MAX_GUESTS = 10;
 constexpr size_t MAX_ALERTS = 8;
 
@@ -50,10 +51,33 @@ struct Host {
   String name;
   bool online = false;
   int cpu = 0;
+  int maxCPU = 0;
+  String cpuModel;
   int memory = 0;
+  int64_t memoryUsed = 0;
+  int64_t memoryTotal = 0;
   int storage = 0;
+  int64_t storageUsed = 0;
+  int64_t storageTotal = 0;
+  int64_t uptime = 0;
+  String load1;
+  String pveVersion;
+  String kernelVersion;
   int running = 0;
   int stopped = 0;
+  String health = "unknown";
+};
+
+struct Storage {
+  String name;
+  String hostName;
+  String status;
+  String pluginType;
+  String content;
+  bool shared = false;
+  int disk = 0;
+  int64_t diskUsed = 0;
+  int64_t diskTotal = 0;
   String health = "unknown";
 };
 
@@ -92,6 +116,8 @@ struct DisplayState {
   Summary summary;
   Host hosts[MAX_HOSTS];
   size_t hostCount = 0;
+  Storage storages[MAX_STORAGES];
+  size_t storageCount = 0;
   Guest guests[MAX_GUESTS];
   size_t guestCount = 0;
   Alert alerts[MAX_ALERTS];
@@ -105,6 +131,8 @@ String deviceIP;
 unsigned long lastPoll = 0;
 unsigned long lastOK = 0;
 uint8_t screenIndex = 0;
+size_t selectedHost = 0;
+size_t selectedStorage = 0;
 size_t selectedGuest = 0;
 
 struct ButtonState {
@@ -318,7 +346,7 @@ bool connectWiFi() {
 }
 
 bool parseState(const String &payload) {
-  DynamicJsonDocument doc(16384);
+  DynamicJsonDocument doc(24576);
   DeserializationError err = deserializeJson(doc, payload);
   if (err) {
     lastError = "JSON parse: " + String(err.c_str());
@@ -343,11 +371,49 @@ bool parseState(const String &payload) {
     host.name = h["name"] | "";
     host.online = h["online"] | false;
     host.cpu = h["cpu_pct"] | 0;
+    host.maxCPU = h["max_cpu"] | 0;
+    host.cpuModel = h["cpu_model"] | "";
     host.memory = h["memory_pct"] | 0;
+    host.memoryUsed = h["memory_used_bytes"] | 0;
+    host.memoryTotal = h["memory_total_bytes"] | 0;
     host.storage = h["storage_pct"] | 0;
+    host.storageUsed = h["storage_used_bytes"] | 0;
+    host.storageTotal = h["storage_total_bytes"] | 0;
+    host.uptime = h["uptime_sec"] | 0;
+    JsonArray load = h["load_avg"].as<JsonArray>();
+    if (!load.isNull() && load.size() > 0) host.load1 = load[0].as<String>();
+    host.pveVersion = h["pve_version"] | "";
+    host.kernelVersion = h["kernel_version"] | "";
     host.running = h["guests_running"] | 0;
     host.stopped = h["guests_stopped"] | 0;
     host.health = h["health"] | "unknown";
+  }
+
+  if (state.hostCount == 0) {
+    selectedHost = 0;
+  } else if (selectedHost >= state.hostCount) {
+    selectedHost = state.hostCount - 1;
+  }
+
+  for (JsonObject s : doc["storages"].as<JsonArray>()) {
+    if (state.storageCount >= MAX_STORAGES) break;
+    Storage &storage = state.storages[state.storageCount++];
+    storage.name = s["name"] | "";
+    storage.hostName = s["host_name"] | "";
+    storage.status = s["status"] | "";
+    storage.pluginType = s["plugin_type"] | "";
+    storage.content = s["content"] | "";
+    storage.shared = s["shared"] | false;
+    storage.disk = s["disk_pct"] | 0;
+    storage.diskUsed = s["disk_used_bytes"] | 0;
+    storage.diskTotal = s["disk_total_bytes"] | 0;
+    storage.health = s["health"] | "unknown";
+  }
+
+  if (state.storageCount == 0) {
+    selectedStorage = 0;
+  } else if (selectedStorage >= state.storageCount) {
+    selectedStorage = state.storageCount - 1;
   }
 
   for (JsonObject g : doc["guests"].as<JsonArray>()) {
@@ -453,6 +519,166 @@ void drawOverview() {
     tft.drawString(String(h.running) + " run", 138, y + 30);
     y += 48;
   }
+  drawFooter();
+}
+
+void drawHosts() {
+  drawHeader("HOSTS", state.summary.health);
+  tft.setTextSize(1);
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.drawString("B selects  CPU RAM STOR", 10, 38);
+  int y = 52;
+  for (size_t i = 0; i < state.hostCount && y < tft.height() - 18; ++i) {
+    Host &h = state.hosts[i];
+    uint16_t rowBg = i == selectedHost ? TFT_DARKGREY : TFT_BLACK;
+    if (i == selectedHost) tft.fillRect(6, y - 1, tft.width() - 12, 13, rowBg);
+    tft.setTextColor(colorForHealth(h.health), rowBg);
+    tft.drawString(h.online ? "ON" : "OFF", 10, y);
+    tft.setTextColor(TFT_WHITE, rowBg);
+    String label = h.name;
+    if (label.length() > 18) label = label.substring(0, 18);
+    tft.drawString(label, 40, y);
+    tft.setTextColor(TFT_LIGHTGREY, rowBg);
+    tft.drawString(String(h.cpu), 210, y);
+    tft.drawString(String(h.memory), 246, y);
+    tft.drawString(String(h.storage), 286, y);
+    y += 14;
+  }
+  drawFooter();
+}
+
+void drawHostDetail() {
+  drawHeader("HOST", state.summary.health);
+  tft.setTextSize(1);
+  if (state.hostCount == 0) {
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString("No host selected", 10, 42);
+    drawFooter();
+    return;
+  }
+
+  Host &h = state.hosts[selectedHost];
+  tft.setTextColor(colorForHealth(h.health), TFT_BLACK);
+  tft.drawString(h.online ? "ONLINE" : "OFFLINE", 10, 38);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  String title = h.name;
+  if (title.length() > 27) title = title.substring(0, 27);
+  tft.drawString(title, 86, 38);
+
+  int y = 58;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("CPU", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(String(h.cpu) + "% / " + String(h.maxCPU) + " cores", 92, y);
+  drawBar(205, y, 85, 8, h.cpu, TFT_CYAN);
+
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("RAM", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(formatBytes(h.memoryUsed) + " / " + formatBytes(h.memoryTotal), 92, y);
+  drawBar(205, y, 85, 8, h.memory, colorForHealth(h.health));
+
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("ROOT", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(formatBytes(h.storageUsed) + " / " + formatBytes(h.storageTotal), 92, y);
+  drawBar(205, y, 85, 8, h.storage, TFT_YELLOW);
+
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("LOAD", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(h.load1.length() ? h.load1 : "-", 92, y);
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("UP", 160, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(formatUptime(h.uptime), 190, y);
+
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("GUESTS", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(String(h.running) + " run  " + String(h.stopped) + " stop", 92, y);
+
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("PVE", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  String pve = h.pveVersion;
+  if (pve.length() > 30) pve = pve.substring(0, 30);
+  tft.drawString(pve.length() ? pve : "-", 92, y);
+
+  y += 18;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("CPU ID", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  String model = h.cpuModel;
+  if (model.length() > 31) model = model.substring(0, 31);
+  tft.drawString(model.length() ? model : "-", 92, y);
+
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(selectedHost + 1) + "/" + String(state.hostCount) + "  B next", tft.width() - 8, 54);
+  tft.setTextDatum(TL_DATUM);
+  drawFooter();
+}
+
+void drawStorage() {
+  drawHeader("STORAGE", state.summary.health);
+  tft.setTextSize(1);
+  if (state.storageCount == 0) {
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString("No storage data", 10, 42);
+    drawFooter();
+    return;
+  }
+
+  Storage &s = state.storages[selectedStorage];
+  tft.setTextColor(colorForHealth(s.health), TFT_BLACK);
+  tft.drawString(s.status.length() ? s.status : "unknown", 10, 38);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  String title = s.name;
+  if (title.length() > 27) title = title.substring(0, 27);
+  tft.drawString(title, 86, 38);
+
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  String where = s.pluginType + "  " + s.hostName;
+  if (where.length() > 42) where = where.substring(0, 42);
+  tft.drawString(where, 10, 54);
+
+  int y = 76;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("USED", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(formatBytes(s.diskUsed) + " / " + formatBytes(s.diskTotal), 92, y);
+  drawBar(205, y, 85, 8, s.disk, colorForHealth(s.health));
+
+  y += 20;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("PCT", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(String(s.disk) + "%", 92, y);
+
+  y += 20;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("SHARED", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  tft.drawString(s.shared ? "yes" : "no", 92, y);
+
+  y += 20;
+  tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
+  tft.drawString("CONTENT", 10, y);
+  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+  String content = s.content;
+  if (content.length() > 33) content = content.substring(0, 33);
+  tft.drawString(content.length() ? content : "-", 92, y);
+
+  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+  tft.setTextDatum(TR_DATUM);
+  tft.drawString(String(selectedStorage + 1) + "/" + String(state.storageCount) + "  B next", tft.width() - 8, 54);
+  tft.setTextDatum(TL_DATUM);
   drawFooter();
 }
 
@@ -616,12 +842,21 @@ void render() {
       drawOverview();
       break;
     case 1:
-      drawGuests();
+      drawHosts();
       break;
     case 2:
-      drawGuestDetail();
+      drawHostDetail();
       break;
     case 3:
+      drawStorage();
+      break;
+    case 4:
+      drawGuests();
+      break;
+    case 5:
+      drawGuestDetail();
+      break;
+    case 6:
       drawAlerts();
       break;
     default:
@@ -671,6 +906,18 @@ void nextGuest() {
   render();
 }
 
+void nextHost() {
+  if (state.hostCount == 0) return;
+  selectedHost = (selectedHost + 1) % state.hostCount;
+  render();
+}
+
+void nextStorage() {
+  if (state.storageCount == 0) return;
+  selectedStorage = (selectedStorage + 1) % state.storageCount;
+  render();
+}
+
 void manualRefresh() {
   fetchState();
   render();
@@ -678,6 +925,14 @@ void manualRefresh() {
 
 void buttonBShort() {
   if (screenIndex == 1 || screenIndex == 2) {
+    nextHost();
+    return;
+  }
+  if (screenIndex == 3) {
+    nextStorage();
+    return;
+  }
+  if (screenIndex == 4 || screenIndex == 5) {
     nextGuest();
     return;
   }
