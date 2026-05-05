@@ -82,7 +82,7 @@ Build and upload from `firmware/t-display-s3` with PlatformIO:
 pio run -t upload --upload-port /dev/cu.usbmodem1101
 ```
 
-On first boot the device creates the Wi-Fi network `PVE-Desk-Setup`. Join it, open the captive portal, and enter Wi-Fi plus bridge URL.
+On first boot the device creates the Wi-Fi network `Proxmox-Desk-Setup`. Join it, open the captive portal, and enter Wi-Fi plus bridge URL.
 
 ## Hardware Support
 
@@ -112,7 +112,7 @@ Authorization: Bearer <display_token>
 ```
 
 It also reads `/api/v1/detail-state` for bounded detail pages. The response
-schema is versioned as `pve-desk-display.v1`. See [docs/api.md](docs/api.md).
+schema is versioned as `proxmox-desk-display.v1`. See [docs/api.md](docs/api.md).
 
 ## License
 

@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-const Schema = "pve-desk-display.v1"
+const Schema = "proxmox-desk-display.v1"
 
 type Health string
 

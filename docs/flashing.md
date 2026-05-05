@@ -24,7 +24,7 @@ If upload fails, enter bootloader mode manually:
 If no config is saved, the device starts an access point:
 
 ```text
-PVE-Desk-Setup
+Proxmox-Desk-Setup
 ```
 
 Join it and open:

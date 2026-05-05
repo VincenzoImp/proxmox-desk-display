@@ -7,11 +7,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/config"
-	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/configstore"
-	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/display"
-	appruntime "github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/runtime"
-	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/store"
+	"github.com/VincenzoImp/proxmox-desk-display/apps/bridge/internal/config"
+	"github.com/VincenzoImp/proxmox-desk-display/apps/bridge/internal/configstore"
+	"github.com/VincenzoImp/proxmox-desk-display/apps/bridge/internal/display"
+	appruntime "github.com/VincenzoImp/proxmox-desk-display/apps/bridge/internal/runtime"
+	"github.com/VincenzoImp/proxmox-desk-display/apps/bridge/internal/store"
 )
 
 func TestDisplayStateRequiresToken(t *testing.T) {

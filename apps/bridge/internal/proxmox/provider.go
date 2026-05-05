@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/config"
-	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/display"
+	"github.com/VincenzoImp/proxmox-desk-display/apps/bridge/internal/config"
+	"github.com/VincenzoImp/proxmox-desk-display/apps/bridge/internal/display"
 )
 
 type Collector struct {

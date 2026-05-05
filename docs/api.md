@@ -42,7 +42,7 @@ Response:
 
 ```json
 {
-  "schema": "pve-desk-display.v1",
+  "schema": "proxmox-desk-display.v1",
   "generated_at": "2026-05-03T12:00:00Z",
   "stale": false,
   "summary": {

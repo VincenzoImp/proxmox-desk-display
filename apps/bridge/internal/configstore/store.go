@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/config"
+	"github.com/VincenzoImp/proxmox-desk-display/apps/bridge/internal/config"
 	"gopkg.in/yaml.v3"
 )
 

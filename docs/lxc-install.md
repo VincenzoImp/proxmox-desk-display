@@ -12,12 +12,12 @@ Recommended LXC sizing:
 Manual binary flow:
 
 ```bash
-useradd --system --home /opt/pve-desk-display --create-home pve-desk
-install -m 0755 pve-desk-display /usr/local/bin/pve-desk-display
-install -m 0640 config.yaml /etc/pve-desk-display.yaml
+useradd --system --home /opt/proxmox-desk-display-bridge --create-home proxmox-desk
+install -m 0755 proxmox-desk-display-bridge /usr/local/bin/proxmox-desk-display-bridge
+install -m 0640 config.yaml /etc/proxmox-desk-display-bridge.yaml
 ```
 
-Create `/etc/systemd/system/pve-desk-display.service`:
+Create `/etc/systemd/system/proxmox-desk-display-bridge.service`:
 
 ```ini
 [Unit]
@@ -26,11 +26,11 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-EnvironmentFile=/etc/pve-desk-display.env
-ExecStart=/usr/local/bin/pve-desk-display --config /etc/pve-desk-display.yaml
+EnvironmentFile=/etc/proxmox-desk-display-bridge.env
+ExecStart=/usr/local/bin/proxmox-desk-display-bridge --config /etc/proxmox-desk-display-bridge.yaml
 Restart=on-failure
-User=pve-desk
-Group=pve-desk
+User=proxmox-desk
+Group=proxmox-desk
 
 [Install]
 WantedBy=multi-user.target
@@ -40,5 +40,5 @@ Then:
 
 ```bash
 systemctl daemon-reload
-systemctl enable --now pve-desk-display
+systemctl enable --now proxmox-desk-display-bridge
 ```

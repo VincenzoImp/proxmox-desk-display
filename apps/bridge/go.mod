@@ -1,4 +1,4 @@
-module github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge
+module github.com/VincenzoImp/proxmox-desk-display/apps/bridge
 
 go 1.23
 

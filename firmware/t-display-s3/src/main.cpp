@@ -12,7 +12,8 @@ SET_LOOP_TASK_STACK_SIZE(32768);
 namespace {
 
 constexpr const char *FW_VERSION = "0.1.0-dev";
-constexpr const char *AP_NAME = "PVE-Desk-Setup";
+constexpr const char *AP_NAME = "Proxmox-Desk-Setup";
+constexpr const char *PREFS_NAMESPACE = "pve-desk";  // Keep legacy namespace so reflashes preserve saved setup.
 constexpr uint8_t DNS_PORT = 53;
 constexpr uint8_t BTN_A = 0;   // BOOT
 constexpr uint8_t BTN_B = 14;  // LILYGO user button
@@ -543,7 +544,7 @@ void drawBoot(const String &message) {
   tft.setTextDatum(MC_DATUM);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.setTextSize(2);
-  tft.drawString("PVE Desk", tft.width() / 2, 58);
+  tft.drawString("Proxmox Desk", tft.width() / 2, 58);
   tft.setTextSize(1);
   tft.setTextColor(TFT_LIGHTGREY, TFT_BLACK);
   tft.drawString(message, tft.width() / 2, 92);
@@ -551,7 +552,7 @@ void drawBoot(const String &message) {
 }
 
 void loadConfig() {
-  prefs.begin("pve-desk", true);
+  prefs.begin(PREFS_NAMESPACE, true);
   cfg.ssid = prefs.getString("ssid", "");
   cfg.password = prefs.getString("password", "");
   cfg.bridgeURL = prefs.getString("bridge", "");
@@ -564,7 +565,7 @@ void loadConfig() {
 }
 
 void saveConfig() {
-  prefs.begin("pve-desk", false);
+  prefs.begin(PREFS_NAMESPACE, false);
   prefs.putString("ssid", cfg.ssid);
   prefs.putString("password", cfg.password);
   prefs.putString("bridge", trimTrailingSlash(cfg.bridgeURL));
@@ -575,7 +576,7 @@ void saveConfig() {
 }
 
 void clearConfig() {
-  prefs.begin("pve-desk", false);
+  prefs.begin(PREFS_NAMESPACE, false);
   prefs.clear();
   prefs.end();
 }
@@ -584,12 +585,12 @@ String setupPage() {
   String page;
   page.reserve(3600);
   page += "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>";
-  page += "<title>PVE Desk Setup</title><style>";
+  page += "<title>Proxmox Desk Setup</title><style>";
   page += "body{font-family:system-ui;margin:24px;max-width:520px;color:#17202a}";
   page += "label{display:block;margin-top:14px;font-weight:600}input{box-sizing:border-box;width:100%;padding:10px;margin-top:6px}";
   page += "button{margin-top:18px;padding:12px 16px;background:#17202a;color:white;border:0;border-radius:6px}";
   page += ".hint{color:#566573;font-size:14px}</style></head><body>";
-  page += "<h1>PVE Desk Setup</h1>";
+  page += "<h1>Proxmox Desk Setup</h1>";
   page += "<p class='hint'>Configure Wi-Fi and bridge connection. Proxmox tokens stay on the bridge, not on this device.</p>";
   page += "<form method='post' action='/save'>";
   page += "<label>Wi-Fi SSID<input name='ssid' value='" + htmlEscape(cfg.ssid) + "' required></label>";

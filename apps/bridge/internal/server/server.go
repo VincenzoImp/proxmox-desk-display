@@ -9,11 +9,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/config"
-	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/display"
-	appruntime "github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/runtime"
-	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/store"
-	"github.com/proxmox-desk-display/proxmox-desk-display/apps/bridge/internal/version"
+	"github.com/VincenzoImp/proxmox-desk-display/apps/bridge/internal/config"
+	"github.com/VincenzoImp/proxmox-desk-display/apps/bridge/internal/display"
+	appruntime "github.com/VincenzoImp/proxmox-desk-display/apps/bridge/internal/runtime"
+	"github.com/VincenzoImp/proxmox-desk-display/apps/bridge/internal/store"
+	"github.com/VincenzoImp/proxmox-desk-display/apps/bridge/internal/version"
 )
 
 type Server struct {
