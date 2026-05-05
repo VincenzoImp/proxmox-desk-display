@@ -14,13 +14,13 @@ go test ./...
 Run mock mode:
 
 ```bash
-DISPLAY_TOKEN=dev-token go run ./cmd/proxmox-desk-display-bridge --mock
+DISPLAY_TOKEN=dev-token go run ./cmd/proxmox-desk-display --mock
 ```
 
 Run with writable admin config:
 
 ```bash
-go run ./cmd/proxmox-desk-display-bridge --data-dir ../../tmp-data
+go run ./cmd/proxmox-desk-display --data-dir ../../tmp-data
 ```
 
 Open:

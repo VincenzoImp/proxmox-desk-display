@@ -15,7 +15,7 @@ http://localhost:8765/admin
 The compose file uses the public image:
 
 ```yaml
-image: vincenzoimp/proxmox-desk-display-bridge:latest
+image: vincenzoimp/proxmox-desk-display:latest
 ```
 
 Before the Docker Hub image exists, build the same `/data`-based setup locally:

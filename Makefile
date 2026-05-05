@@ -4,10 +4,10 @@ bridge-test:
 	cd apps/bridge && go test ./...
 
 bridge-run:
-	cd apps/bridge && go run ./cmd/proxmox-desk-display-bridge --config ../../config.yaml
+	cd apps/bridge && go run ./cmd/proxmox-desk-display --config ../../config.yaml
 
 bridge-mock:
-	cd apps/bridge && DISPLAY_TOKEN=dev-token go run ./cmd/proxmox-desk-display-bridge --mock
+	cd apps/bridge && DISPLAY_TOKEN=dev-token go run ./cmd/proxmox-desk-display --mock
 
 firmware-build:
 	cd firmware/t-display-s3 && pio run

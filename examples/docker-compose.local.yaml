@@ -2,7 +2,7 @@ services:
   bridge:
     build:
       context: ../apps/bridge
-    image: proxmox-desk-display-bridge:local
+    image: proxmox-desk-display:local
     container_name: proxmox-desk-display
     restart: unless-stopped
     ports:

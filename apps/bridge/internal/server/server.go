@@ -467,7 +467,7 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Proxmox Desk Display Bridge</title>
+  <title>Proxmox Desk Display</title>
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, sans-serif; margin: 2rem; max-width: 980px; color: #17202a; }
     code, pre { background: #f4f6f8; border-radius: 6px; }
@@ -480,8 +480,8 @@ var indexTemplate = template.Must(template.New("index").Parse(`<!doctype html>
   </style>
 </head>
 <body>
-  <h1>Proxmox Desk Display Bridge</h1>
-  <p>Version {{.Version}}{{if .Mock}} · mock mode{{end}}</p>
+  <h1>Proxmox Desk Display</h1>
+  <p>Bridge service · version {{.Version}}{{if .Mock}} · mock mode{{end}}</p>
   <p>Display endpoint: <code>/api/v1/display-state</code> · detail endpoint: <code>/api/v1/detail-state</code> · full inventory: <code>/api/v1/full-state</code></p>
   <h2>Summary</h2>
   <p class="{{.State.Summary.Health}}">Health: {{.State.Summary.Health}}</p>

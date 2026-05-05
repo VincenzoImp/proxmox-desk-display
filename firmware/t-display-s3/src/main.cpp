@@ -557,7 +557,7 @@ void loadConfig() {
   cfg.password = prefs.getString("password", "");
   cfg.bridgeURL = prefs.getString("bridge", "");
   cfg.displayToken = prefs.getString("token", "");
-  cfg.deviceName = prefs.getString("name", "desk-display");
+  cfg.deviceName = prefs.getString("name", "proxmox-desk");
   cfg.brightness = prefs.getUChar("bright", 220);
   prefs.end();
   cfg.configured = cfg.ssid.length() > 0 && cfg.bridgeURL.length() > 0 && cfg.displayToken.length() > 0;
@@ -570,7 +570,7 @@ void saveConfig() {
   prefs.putString("password", cfg.password);
   prefs.putString("bridge", trimTrailingSlash(cfg.bridgeURL));
   prefs.putString("token", cfg.displayToken);
-  prefs.putString("name", cfg.deviceName.length() == 0 ? "desk-display" : cfg.deviceName);
+  prefs.putString("name", cfg.deviceName.length() == 0 ? "proxmox-desk" : cfg.deviceName);
   prefs.putUChar("bright", cfg.brightness);
   prefs.end();
 }

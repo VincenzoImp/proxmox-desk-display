@@ -6,10 +6,14 @@ It builds `apps/bridge/Dockerfile` for `linux/amd64` and `linux/arm64` and
 pushes:
 
 ```text
-vincenzoimp/proxmox-desk-display-bridge:latest
-vincenzoimp/proxmox-desk-display-bridge:main-<sha>
-vincenzoimp/proxmox-desk-display-bridge:<semver tag>
+vincenzoimp/proxmox-desk-display:latest
+vincenzoimp/proxmox-desk-display:main-<sha>
+vincenzoimp/proxmox-desk-display:<semver tag>
 ```
+
+The Docker Hub repository uses the product name rather than a component name
+because this container is the standard runtime users install. Internally it
+runs the bridge service.
 
 Configure these GitHub repository secrets:
 
