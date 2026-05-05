@@ -43,6 +43,6 @@ Long press B cycles brightness.
 16. `CERTS`: selected node certificate with filename, host, subject, issuer, days remaining, and expiry health.
 17. `CAPS`: selected endpoint capability diagnostic, sorted so permission and availability problems appear before healthy endpoints.
 18. `ALERTS`: paged active warnings and critical issues.
-19. `DEVICE`: Wi-Fi, device IP, bridge status, detail endpoint status, and firmware version.
+19. `DEVICE`: Wi-Fi, device IP, RSSI, brightness, bridge status, detail endpoint status, and firmware version.
 
 The UI is intentionally glance-first. Global alerts appear as compact counters outside the alert screen; individual detail screens use the selected item's own health. Raw, unbounded data belongs in the bridge debug/API, while the device consumes `/api/v1/display-state` plus bounded `/api/v1/detail-state` and shows prioritized drill-down details.

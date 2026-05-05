@@ -44,6 +44,11 @@ type SourceSnapshot struct {
 	TokenSet    bool
 }
 
+type SourceDiagnostic struct {
+	Message     string
+	Fingerprint string
+}
+
 type ServerUpdate struct {
 	PollIntervalSeconds int
 	StaleAfterSeconds   int
@@ -135,47 +140,17 @@ func (m *Manager) UpdateServer(ctx context.Context, input ServerUpdate) error {
 
 func (m *Manager) UpsertSource(ctx context.Context, input SourceUpdate) error {
 	cfg, secrets := m.clone()
-	id := configstore.SanitizeID(input.ID)
-	if id == "" {
-		id = configstore.SanitizeID(input.Name)
+	source, err := sourceFromUpdate(cfg, secrets, input, true)
+	if err != nil {
+		return err
 	}
-	if id == "" {
-		return errors.New("source id or name is required")
-	}
-	name := strings.TrimSpace(input.Name)
-	if name == "" {
-		name = id
-	}
-	baseURL := strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
-	if baseURL == "" {
-		return errors.New("base URL is required")
-	}
-	tlsMode := strings.TrimSpace(input.TLSMode)
-	if tlsMode == "" {
-		tlsMode = "fingerprint"
-	}
-
-	token := strings.TrimSpace(input.Token)
+	id := source.ID
 	idx := sourceIndex(cfg, id)
-	if idx < 0 && token == "" {
-		return errors.New("token is required for a new Proxmox source")
-	}
-	if token != "" {
+	if token := strings.TrimSpace(input.Token); token != "" {
 		if secrets.ProxmoxTokens == nil {
 			secrets.ProxmoxTokens = map[string]string{}
 		}
 		secrets.ProxmoxTokens[id] = token
-	}
-
-	source := config.ProxmoxHost{
-		ID:      id,
-		Name:    name,
-		BaseURL: baseURL,
-		TLS: config.TLSConfig{
-			Mode:        tlsMode,
-			Fingerprint: strings.TrimSpace(input.Fingerprint),
-			CAFile:      strings.TrimSpace(input.CAFile),
-		},
 	}
 	if idx >= 0 {
 		cfg.Proxmox[idx] = source
@@ -184,6 +159,30 @@ func (m *Manager) UpsertSource(ctx context.Context, input SourceUpdate) error {
 	}
 	configstore.ApplySecrets(&cfg, secrets)
 	return m.apply(ctx, cfg, secrets)
+}
+
+func (m *Manager) TestSource(ctx context.Context, input SourceUpdate) (SourceDiagnostic, error) {
+	cfg, secrets := m.clone()
+	source, err := sourceFromUpdate(cfg, secrets, input, true)
+	if err != nil {
+		return SourceDiagnostic{}, err
+	}
+	result, err := proxmox.TestHost(ctx, source)
+	if err != nil {
+		return SourceDiagnostic{}, err
+	}
+	message := "connection OK"
+	if result.Version != "" {
+		message += ": Proxmox VE " + result.Version
+		if result.Release != "" {
+			message += " (" + result.Release + ")"
+		}
+	}
+	return SourceDiagnostic{Message: message, Fingerprint: result.Fingerprint}, nil
+}
+
+func (m *Manager) DetectFingerprint(ctx context.Context, baseURL string) (string, error) {
+	return proxmox.DetectFingerprint(ctx, baseURL)
 }
 
 func (m *Manager) DeleteSource(ctx context.Context, id string) error {
@@ -266,6 +265,82 @@ func sourceIndex(cfg config.Config, id string) int {
 		}
 	}
 	return -1
+}
+
+func sourceFromUpdate(cfg config.Config, secrets configstore.Secrets, input SourceUpdate, requireToken bool) (config.ProxmoxHost, error) {
+	id := configstore.SanitizeID(input.ID)
+	if id == "" {
+		id = configstore.SanitizeID(input.Name)
+	}
+	if id == "" {
+		return config.ProxmoxHost{}, errors.New("source id or name is required")
+	}
+	idx := sourceIndex(cfg, id)
+	var existing config.ProxmoxHost
+	if idx >= 0 {
+		existing = cfg.Proxmox[idx]
+	}
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		name = existing.Name
+	}
+	if name == "" {
+		name = id
+	}
+	baseURL := strings.TrimRight(strings.TrimSpace(input.BaseURL), "/")
+	if baseURL == "" {
+		baseURL = existing.BaseURL
+	}
+	if baseURL == "" {
+		return config.ProxmoxHost{}, errors.New("base URL is required")
+	}
+	tlsMode := strings.TrimSpace(input.TLSMode)
+	if tlsMode == "" {
+		tlsMode = existing.TLS.Mode
+	}
+	if tlsMode == "" {
+		tlsMode = "fingerprint"
+	}
+	token := strings.TrimSpace(input.Token)
+	tokenValue := token
+	if tokenValue == "" {
+		tokenValue = strings.TrimSpace(secrets.ProxmoxTokens[id])
+	}
+	tokenEnv := ""
+	if tokenValue == "" {
+		tokenEnv = existing.TokenEnv
+	}
+	if requireToken && tokenValue == "" && tokenEnv == "" {
+		return config.ProxmoxHost{}, errors.New("token is required")
+	}
+	source := config.ProxmoxHost{
+		ID:         id,
+		Name:       name,
+		BaseURL:    baseURL,
+		TokenEnv:   tokenEnv,
+		TokenValue: tokenValue,
+		TLS: config.TLSConfig{
+			Mode:        tlsMode,
+			Fingerprint: firstNonEmpty(strings.TrimSpace(input.Fingerprint), existing.TLS.Fingerprint),
+			CAFile:      firstNonEmpty(strings.TrimSpace(input.CAFile), existing.TLS.CAFile),
+		},
+	}
+	if strings.TrimSpace(input.Fingerprint) == "" && input.TLSMode != "" {
+		source.TLS.Fingerprint = ""
+	}
+	if strings.TrimSpace(input.CAFile) == "" && input.TLSMode != "" {
+		source.TLS.CAFile = ""
+	}
+	return source, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func clamp(value int, minValue int, maxValue int) int {

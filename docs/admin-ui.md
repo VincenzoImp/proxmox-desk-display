@@ -56,5 +56,16 @@ Recommended TLS mode is `fingerprint`, using the SHA256 fingerprint of the
 Proxmox certificate. `system`, `ca_file`, and `insecure` are available for
 specific deployments.
 
+Use `Detect Fingerprint` to read the certificate fingerprint directly from the
+Proxmox URL. Use `Test Connection` to verify URL, TLS, and API token before or
+after saving. The test calls the Proxmox `/api2/json/version` endpoint and does
+not store changes unless you press `Save Source`.
+
 To update an existing source, submit the same ID again. Leave the token field
 blank to keep the saved token.
+
+## Safety
+
+Admin form posts reject cross-origin `Origin` or `Referer` headers. For public
+or remote access, still put the bridge behind a trusted HTTPS reverse proxy and
+use a dedicated admin token that differs from the display token.

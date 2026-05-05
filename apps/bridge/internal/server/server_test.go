@@ -121,6 +121,28 @@ func TestAdminRequiresAdminTokenWhenConfigured(t *testing.T) {
 	}
 }
 
+func TestAdminRejectsCrossOriginPost(t *testing.T) {
+	cfg := config.NewDefault()
+	cfg.Server.DisplayTokenValue = "display"
+	cache := store.NewCache(store.NewEmptyCollector(), cfg.Server.PollInterval(), cfg.Server.StaleAfter())
+	if err := cache.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	cfgStore := configstore.New(t.TempDir(), "")
+	manager := appruntime.NewManager(cfg, configstore.Secrets{DisplayToken: "display"}, cfgStore, cache, false)
+	handler := New(cfg, cache, false, manager)
+
+	req := httptest.NewRequest(http.MethodPost, "/admin/refresh", nil)
+	req.Host = "bridge.local"
+	req.Header.Set("Origin", "http://evil.local")
+	req.SetBasicAuth("admin", "display")
+	res := httptest.NewRecorder()
+	handler.ServeHTTP(res, req)
+	if res.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want forbidden", res.Code)
+	}
+}
+
 type inventoryCollector struct{}
 
 func (inventoryCollector) Collect(context.Context) (display.State, error) {

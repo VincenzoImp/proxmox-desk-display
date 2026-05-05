@@ -1,6 +1,7 @@
 package server
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"html/template"
 	"net/http"
@@ -44,6 +45,8 @@ func (s *Server) routes() {
 	s.mux.Handle("/admin", s.adminAuth(http.HandlerFunc(s.adminIndex)))
 	s.mux.Handle("/admin/settings", s.adminAuth(http.HandlerFunc(s.adminSettings)))
 	s.mux.Handle("/admin/proxmox", s.adminAuth(http.HandlerFunc(s.adminProxmox)))
+	s.mux.Handle("/admin/proxmox/test", s.adminAuth(http.HandlerFunc(s.adminTestProxmox)))
+	s.mux.Handle("/admin/proxmox/fingerprint", s.adminAuth(http.HandlerFunc(s.adminDetectFingerprint)))
 	s.mux.Handle("/admin/proxmox/delete", s.adminAuth(http.HandlerFunc(s.adminDeleteProxmox)))
 	s.mux.Handle("/admin/refresh", s.adminAuth(http.HandlerFunc(s.adminRefresh)))
 	s.mux.HandleFunc("/healthz", s.healthz)
@@ -119,7 +122,7 @@ func (s *Server) auth(next http.Handler) http.Handler {
 			return
 		}
 		header := r.Header.Get("Authorization")
-		if !strings.HasPrefix(header, "Bearer ") || strings.TrimPrefix(header, "Bearer ") != token {
+		if !strings.HasPrefix(header, "Bearer ") || !tokenEqual(strings.TrimPrefix(header, "Bearer "), token) {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
 			return
 		}
@@ -129,18 +132,22 @@ func (s *Server) auth(next http.Handler) http.Handler {
 
 func (s *Server) adminAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && !sameOrigin(r) {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "cross-origin admin post rejected"})
+			return
+		}
 		token := s.currentConfig().Server.AdminToken()
 		if token == "" {
 			next.ServeHTTP(w, r)
 			return
 		}
 		if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") &&
-			strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ") == token {
+			tokenEqual(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), token) {
 			next.ServeHTTP(w, r)
 			return
 		}
 		user, pass, ok := r.BasicAuth()
-		if ok && user == "admin" && pass == token {
+		if ok && user == "admin" && tokenEqual(pass, token) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -173,12 +180,14 @@ func (s *Server) adminIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	state, _ := s.cache.State()
+	snap := s.admin.Snapshot()
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = adminTemplate.Execute(w, map[string]any{
 		"Version": version.Version,
 		"State":   state,
 		"Cache":   s.cache.Metadata(),
-		"Admin":   s.admin.Snapshot(),
+		"Admin":   snap,
+		"Draft":   sourceDraftFromRequest(r, snap),
 		"Message": r.URL.Query().Get("message"),
 		"Error":   r.URL.Query().Get("error"),
 	})
@@ -224,15 +233,57 @@ func (s *Server) adminProxmox(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err := s.admin.UpsertSource(r.Context(), appruntime.SourceUpdate{
-		ID:          r.FormValue("id"),
-		Name:        r.FormValue("name"),
-		BaseURL:     r.FormValue("base_url"),
-		Token:       r.FormValue("token"),
-		TLSMode:     r.FormValue("tls_mode"),
-		Fingerprint: r.FormValue("fingerprint"),
-		CAFile:      r.FormValue("ca_file"),
+		ID:          r.PostFormValue("id"),
+		Name:        r.PostFormValue("name"),
+		BaseURL:     r.PostFormValue("base_url"),
+		Token:       r.PostFormValue("token"),
+		TLSMode:     r.PostFormValue("tls_mode"),
+		Fingerprint: r.PostFormValue("fingerprint"),
+		CAFile:      r.PostFormValue("ca_file"),
 	})
 	redirectAdmin(w, r, "source saved", err)
+}
+
+func (s *Server) adminTestProxmox(w http.ResponseWriter, r *http.Request) {
+	if s.admin == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		redirectAdmin(w, r, "", err)
+		return
+	}
+	result, err := s.admin.TestSource(r.Context(), sourceUpdateFromForm(r))
+	if err != nil {
+		redirectAdminWithDraft(w, r, "", err, "")
+		return
+	}
+	message := result.Message
+	if result.Fingerprint != "" {
+		message += " · " + result.Fingerprint
+	}
+	redirectAdminWithDraft(w, r, message, nil, result.Fingerprint)
+}
+
+func (s *Server) adminDetectFingerprint(w http.ResponseWriter, r *http.Request) {
+	if s.admin == nil {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		redirectAdmin(w, r, "", err)
+		return
+	}
+	fingerprint, err := s.admin.DetectFingerprint(r.Context(), r.PostFormValue("base_url"))
+	redirectAdminWithDraft(w, r, "fingerprint detected", err, fingerprint)
 }
 
 func (s *Server) adminDeleteProxmox(w http.ResponseWriter, r *http.Request) {
@@ -248,7 +299,7 @@ func (s *Server) adminDeleteProxmox(w http.ResponseWriter, r *http.Request) {
 		redirectAdmin(w, r, "", err)
 		return
 	}
-	err := s.admin.DeleteSource(r.Context(), r.FormValue("id"))
+	err := s.admin.DeleteSource(r.Context(), r.PostFormValue("id"))
 	redirectAdmin(w, r, "source deleted", err)
 }
 
@@ -281,6 +332,31 @@ func redirectAdmin(w http.ResponseWriter, r *http.Request, message string, err e
 	http.Redirect(w, r, target, http.StatusSeeOther)
 }
 
+func redirectAdminWithDraft(w http.ResponseWriter, r *http.Request, message string, err error, fingerprint string) {
+	values := url.Values{}
+	for _, key := range []string{"id", "name", "base_url", "tls_mode", "ca_file"} {
+		if value := strings.TrimSpace(r.PostFormValue(key)); value != "" {
+			values.Set(key, value)
+		}
+	}
+	if fingerprint == "" {
+		fingerprint = strings.TrimSpace(r.PostFormValue("fingerprint"))
+	}
+	if fingerprint != "" {
+		values.Set("fingerprint", fingerprint)
+	}
+	if err != nil {
+		values.Set("error", err.Error())
+	} else if message != "" {
+		values.Set("message", message)
+	}
+	target := "/admin"
+	if encoded := values.Encode(); encoded != "" {
+		target += "?" + encoded
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
 func atoiDefault(value string, fallback int) int {
 	parsed, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil {
@@ -291,6 +367,99 @@ func atoiDefault(value string, fallback int) int {
 
 func urlQuery(value string) string {
 	return url.QueryEscape(value)
+}
+
+func tokenEqual(got string, want string) bool {
+	if got == "" || want == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(want)) == 1
+}
+
+func sourceUpdateFromForm(r *http.Request) appruntime.SourceUpdate {
+	return appruntime.SourceUpdate{
+		ID:          r.PostFormValue("id"),
+		Name:        r.PostFormValue("name"),
+		BaseURL:     r.PostFormValue("base_url"),
+		Token:       r.PostFormValue("token"),
+		TLSMode:     r.PostFormValue("tls_mode"),
+		Fingerprint: r.PostFormValue("fingerprint"),
+		CAFile:      r.PostFormValue("ca_file"),
+	}
+}
+
+type sourceDraft struct {
+	Editing     bool
+	ID          string
+	Name        string
+	BaseURL     string
+	TLSMode     string
+	Fingerprint string
+	CAFile      string
+	TokenHint   string
+}
+
+func sourceDraftFromRequest(r *http.Request, snap appruntime.Snapshot) sourceDraft {
+	draft := sourceDraft{
+		ID:          r.URL.Query().Get("id"),
+		Name:        r.URL.Query().Get("name"),
+		BaseURL:     r.URL.Query().Get("base_url"),
+		TLSMode:     r.URL.Query().Get("tls_mode"),
+		Fingerprint: r.URL.Query().Get("fingerprint"),
+		CAFile:      r.URL.Query().Get("ca_file"),
+		TokenHint:   "required for new source",
+	}
+	if draft.TLSMode == "" {
+		draft.TLSMode = "fingerprint"
+	}
+	if editID := configstoreID(r.URL.Query().Get("edit")); editID != "" {
+		for _, source := range snap.Sources {
+			if source.ID == editID {
+				draft.Editing = true
+				draft.ID = source.ID
+				draft.Name = source.Name
+				draft.BaseURL = source.BaseURL
+				draft.TLSMode = source.TLSMode
+				draft.Fingerprint = source.Fingerprint
+				draft.CAFile = source.CAFile
+				draft.TokenHint = "saved, leave blank to keep"
+				break
+			}
+		}
+	}
+	if draft.ID != "" && draft.TokenHint == "required for new source" {
+		for _, source := range snap.Sources {
+			if source.ID == draft.ID && source.TokenSet {
+				draft.TokenHint = "saved, leave blank to keep"
+				break
+			}
+		}
+	}
+	return draft
+}
+
+func configstoreID(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, "_", "-")
+	return value
+}
+
+func sameOrigin(r *http.Request) bool {
+	if origin := r.Header.Get("Origin"); origin != "" {
+		return originMatchesHost(origin, r.Host)
+	}
+	if referer := r.Header.Get("Referer"); referer != "" {
+		return originMatchesHost(referer, r.Host)
+	}
+	return true
+}
+
+func originMatchesHost(rawURL string, host string) bool {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(parsed.Host, host)
 }
 
 var indexTemplate = template.Must(template.New("index").Parse(`<!doctype html>
@@ -434,10 +603,17 @@ var adminTemplate = template.Must(template.New("admin").Parse(`<!doctype html>
             <td>{{.TLSMode}}</td>
             <td>{{if .TokenSet}}<span class="ok">saved</span>{{else}}<span class="danger-text">missing</span>{{end}}</td>
             <td>
-              <form method="post" action="/admin/proxmox/delete">
-                <input type="hidden" name="id" value="{{.ID}}">
-                <button class="danger" type="submit">Delete</button>
-              </form>
+              <div class="actions">
+                <a class="pill" href="/admin?edit={{.ID}}">Edit</a>
+                <form method="post" action="/admin/proxmox/test">
+                  <input type="hidden" name="id" value="{{.ID}}">
+                  <button class="secondary" type="submit">Test</button>
+                </form>
+                <form method="post" action="/admin/proxmox/delete" onsubmit="return confirm('Delete this Proxmox source?');">
+                  <input type="hidden" name="id" value="{{.ID}}">
+                  <button class="danger" type="submit">Delete</button>
+                </form>
+              </div>
             </td>
           </tr>
         {{else}}
@@ -448,34 +624,39 @@ var adminTemplate = template.Must(template.New("admin").Parse(`<!doctype html>
     </section>
 
     <section>
-      <h2>Add Or Update Proxmox</h2>
+      <h2>{{if .Draft.Editing}}Edit Proxmox{{else}}Add Or Update Proxmox{{end}}</h2>
       <form method="post" action="/admin/proxmox">
         <div class="grid">
           <div>
             <label>ID</label>
-            <input name="id" placeholder="zimablade">
+            <input name="id" placeholder="zimablade" value="{{.Draft.ID}}">
             <label>Name</label>
-            <input name="name" placeholder="Zimablade">
+            <input name="name" placeholder="Zimablade" value="{{.Draft.Name}}">
             <label>Base URL</label>
-            <input name="base_url" placeholder="https://192.168.1.56:8006">
+            <input name="base_url" placeholder="https://192.168.1.56:8006" value="{{.Draft.BaseURL}}">
           </div>
           <div>
             <label>API token</label>
-            <input name="token" type="password" placeholder="PVEAPIToken=monitor@pve!desk=...">
+            <input name="token" type="password" placeholder="{{.Draft.TokenHint}}">
             <label>TLS mode</label>
             <select name="tls_mode">
-              <option value="fingerprint">fingerprint</option>
-              <option value="system">system</option>
-              <option value="insecure">insecure</option>
-              <option value="ca_file">ca_file</option>
+              <option value="fingerprint" {{if eq .Draft.TLSMode "fingerprint"}}selected{{end}}>fingerprint</option>
+              <option value="system" {{if eq .Draft.TLSMode "system"}}selected{{end}}>system</option>
+              <option value="insecure" {{if eq .Draft.TLSMode "insecure"}}selected{{end}}>insecure</option>
+              <option value="ca_file" {{if eq .Draft.TLSMode "ca_file"}}selected{{end}}>ca_file</option>
             </select>
             <label>SHA256 fingerprint</label>
-            <input name="fingerprint" placeholder="SHA256:...">
+            <input name="fingerprint" placeholder="SHA256:..." value="{{.Draft.Fingerprint}}">
             <label>CA file</label>
-            <input name="ca_file" placeholder="/data/ca.pem">
+            <input name="ca_file" placeholder="/data/ca.pem" value="{{.Draft.CAFile}}">
           </div>
         </div>
-        <button type="submit">Save Source</button>
+        <div class="actions">
+          <button type="submit">Save Source</button>
+          <button class="secondary" type="submit" formaction="/admin/proxmox/test">Test Connection</button>
+          <button class="secondary" type="submit" formaction="/admin/proxmox/fingerprint">Detect Fingerprint</button>
+          {{if .Draft.Editing}}<a class="pill" href="/admin">Cancel edit</a>{{end}}
+        </div>
       </form>
     </section>
   </main>

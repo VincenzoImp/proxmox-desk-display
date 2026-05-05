@@ -26,11 +26,14 @@ pveum user token permissions monitor@pve desk
 
 The token permissions output should include `Sys.Audit`.
 
-Save the token value in `.env`:
+Paste the token value into the bridge admin UI when adding the Proxmox source:
 
-```bash
-PVE_A_TOKEN='monitor@pve!desk=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'
+```text
+monitor@pve!desk=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 ```
+
+Legacy `.env` based installs are still supported, but the Docker image workflow
+stores tokens in `/data/secrets.yaml` through the admin UI.
 
 The bridge sends it as:
 
