@@ -11,7 +11,7 @@ SET_LOOP_TASK_STACK_SIZE(32768);
 
 namespace {
 
-constexpr const char *FW_VERSION = "0.1.0-dev";
+constexpr const char *FW_VERSION = "0.1.0";
 constexpr const char *AP_NAME = "Proxmox-Desk-Setup";
 constexpr const char *PREFS_NAMESPACE = "pve-desk";  // Keep legacy namespace so reflashes preserve saved setup.
 constexpr uint8_t DNS_PORT = 53;
